@@ -1,0 +1,16 @@
+{
+  "adjust_bottle": {
+    "task_name": "adjust_bottle",
+    "success_seeds": [
+      100000,
+      100003
+    ],
+    "setup_demo_fail_seeds": [
+      100001,
+      100002
+    ],
+    "play_once_fail_seeds": [],
+    "not_success_seeds": [],
+    "total_tried": 100001
+  }
+}
