@@ -152,7 +152,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             if transpose:
                 sample = jax.tree.map(
                     lambda x: x.transpose(1, 2, 0)
-                    if len(x.shape) == 3 and transpose
+                    if len(x.shape) == 3 and transpose and x.shape[0]==3
                     else x,
                     sample,
                 )

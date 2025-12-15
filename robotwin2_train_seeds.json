@@ -12,5 +12,76 @@
     "play_once_fail_seeds": [],
     "not_success_seeds": [],
     "total_tried": 100001
+  },
+  "lift_pot": {
+    "task_name": "lift_pot",
+    "success_seeds": [
+      100007,
+      100024
+    ],
+    "setup_demo_fail_seeds": [
+      100003,
+      100005,
+      100010,
+      100012,
+      100019
+    ],
+    "play_once_fail_seeds": [
+      100001,
+      100002,
+      100004,
+      100006,
+      100009,
+      100013,
+      100014,
+      100015,
+      100016,
+      100018,
+      100020,
+      100023
+    ],
+    "not_success_seeds": [
+      100000,
+      100008,
+      100011,
+      100017,
+      100021,
+      100022
+    ],
+    "total_tried": 100001
+  },
+  "place_empty_cup": {
+    "task_name": "place_empty_cup",
+    "success_seeds": [
+      100000,
+      100001,
+      100002,
+      100003,
+      100004,
+      125000,
+      125001,
+      125002,
+      125003,
+      125004,
+      175000,
+      175002,
+      175003,
+      175004,
+      175005,
+      150000,
+      150001,
+      150003,
+      150004,
+      150006
+    ],
+    "setup_demo_fail_seeds": [
+      150002,
+      150005
+    ],
+    "play_once_fail_seeds": [],
+    "not_success_seeds": [
+      175001
+    ],
+    "total_tried": 100001
   }
 }

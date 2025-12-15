@@ -159,20 +159,23 @@ def _gripper_from_angular_inv(value):
 def _decode_aloha(data: dict, *, adapt_to_pi: bool = False) -> dict:
     # state is [left_arm_joint_angles, left_arm_gripper, right_arm_joint_angles, right_arm_gripper]
     # dim sizes: [6, 1, 6, 1]
-    state = np.asarray(data["state"])
+    state = np.asarray(data["observation/state"])
     state = _decode_state(state, adapt_to_pi=adapt_to_pi)
-
     def convert_image(img):
         img = np.asarray(img)
         # Convert to uint8 if using float images.
         if np.issubdtype(img.dtype, np.floating):
             img = (255 * img).astype(np.uint8)
         # Convert from [channel, height, width] to [height, width, channel].
-        return einops.rearrange(img, "c h w -> h w c")
+        if img.shape[0] == 3:
+            img = einops.rearrange(img, "c h w -> h w c")
+        return img
 
-    images = data["images"]
-    images_dict = {name: convert_image(img) for name, img in images.items()}
-
+    # images = data["images"]
+    # images_dict = {name: convert_image(img) for name, img in images.items()}
+    # TODO: 这里暂时只弄处理一个image的情况
+    image = data["observation/image"]
+    images_dict = {"cam_high": convert_image(image)}
     data["images"] = images_dict
     data["state"] = state
     return data

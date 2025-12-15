@@ -9,10 +9,10 @@ export PYTHONPATH=${ROBOTWIN_PATH}:$PYTHONPATH
 
 export ASSETS_PATH="/mnt/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
-DATASET_NAME="adjust_bottle"
+DATASET_NAME="place_empty_cup"
 #start collect seed
 
 # python ${SRC_FILE} --tasks $DATASET_NAME --seed-start  100000  --seed-end  200000  --target-count 100  --num-gpus 4  --data-split train
-python ${SRC_FILE} --tasks $DATASET_NAME --seed-start  100000  --seed-end  200000  --target-count 2  --num-gpus 1  --data-split train
+python ${SRC_FILE} --tasks $DATASET_NAME --seed-start  100000  --seed-end  200000  --target-count 20  --num-gpus 4  --data-split train
 #python pre_collect_robotwin2_seed.py --tasks $DATASET_NAME --seed-start  100000000  --seed-end  100100000  --target-count 160  --num-gpus 8  --data-split eval
 # collect seed end 

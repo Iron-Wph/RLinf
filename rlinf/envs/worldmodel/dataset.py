@@ -131,9 +131,21 @@ class LeRobotDatasetWrapper(torch.utils.data.Dataset):
         self._lerobot_dataset = LeRobotDataset(
             repo_id, root, image_transforms=image_transforms
         )
-        self.timestamps = torch.stack(
-            self._lerobot_dataset.hf_dataset["timestamp"]
-        ).numpy()
+        # Fix compatibility with newer versions of HuggingFace datasets
+        # where hf_dataset["timestamp"] returns a Column object instead of directly stackable tensors
+        timestamp_column = self._lerobot_dataset.hf_dataset["timestamp"]
+        if hasattr(timestamp_column, 'to_list'):
+            timestamp_list = timestamp_column.to_list()
+        elif hasattr(timestamp_column, 'to_pylist'):
+            timestamp_list = timestamp_column.to_pylist()
+        else:
+            # Fallback: iterate through the column
+            timestamp_list = [timestamp_column[i] for i in range(len(timestamp_column))]
+        
+        # Convert to tensors and stack
+        timestamp_tensors = [torch.tensor(ts) if not isinstance(ts, torch.Tensor) else ts 
+                            for ts in timestamp_list]
+        self.timestamps = torch.stack(timestamp_tensors).numpy()
         self.action_dim = self._lerobot_dataset.features["action"]["shape"][0]
         for camera_name in camera_names:
             assert camera_name in self._lerobot_dataset.meta.camera_keys

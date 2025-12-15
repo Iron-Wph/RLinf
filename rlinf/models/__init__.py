@@ -202,6 +202,11 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
                 actor_train_config = get_openpi_config("pi05_metaworld")
             else:
                 actor_train_config = get_openpi_config("pi0_metaworld")
+        elif simulator_type == "robotwin":
+            # actor_train_config = get_openpi_config("place_empty_cup_random")
+            # actor_train_config = get_openpi_config("adjust_bottle_test")
+            task_type = getattr(cfg.openpi, "task_type", "place_empty_cup_clean")
+            actor_train_config = get_openpi_config(task_type)
         else:
             raise ValueError(f"Invalid simulator type: {simulator_type}")
         actor_model_config = actor_train_config.model
