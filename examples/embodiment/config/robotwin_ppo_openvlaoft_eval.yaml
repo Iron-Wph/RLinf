@@ -1,8 +1,20 @@
+# defaults:
+#   - env/train: robotwin_stack_bowls_two_simple
+#   - env/eval: robotwin_stack_bowls_two_simple
+#   - override hydra/job_logging: stdout
 defaults:
-  - env/train: robotwin_single_task
-  - env/eval: robotwin_single_task
+  - env/train: robotwin_place_empty_cup_simple
+  - env/eval: robotwin_place_empty_cup_simple
   - override hydra/job_logging: stdout
+# defaults:
+#   - env/train: robotwin_beat_block_hammer_simple
+#   - env/eval: robotwin_beat_block_hammer_simple
+#   - override hydra/job_logging: stdout
 
+# defaults:
+#   - env/train: robotwin_pick_dual_bottles_simple
+#   - env/eval: robotwin_pick_dual_bottles_simple
+#   - override hydra/job_logging: stdout
 ### for eval
 
 hydra:
@@ -40,7 +52,7 @@ runner:
 
 
 algorithm:
-  auto_reset: False
+  auto_reset: True
   ignore_terminations: True
   use_fixed_reset_state_ids: False
   # 
@@ -48,9 +60,11 @@ algorithm:
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
   #### 应该等于环境的max_step // num_action_chunks 才和 simple等价
-  n_chunk_steps: 1 # 20
-  n_eval_chunk_steps: 8   # 128 / 4 = 32, 32 * 8 = 256 traj length for eval
-  num_group_envs: 128
+  n_chunk_steps: 8 # 20
+  n_eval_chunk_steps: 128   # 128 / 8 = 16, 16 * 8 = 128 traj length for eval
+  # n_eval_chunk_steps: 64   # 128 / 8 = 16, 16 * 4 = 64 traj length for eval
+  # n_eval_chunk_steps: 256   # 128 / 8 = 16, 16 * 16 = 256 traj length for eval
+  num_group_envs: 8
   rollout_epoch: 1 # 16
 
   reward_type: chunk_level
@@ -123,7 +137,10 @@ actor:
   enable_offload: True
 
   model:
+    # model_dir: "/mnt/public/wph/models/robotwin2_stack_bowls_two_seed1k_sft_aloha_25chunks_40k"
     model_dir: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    # model_dir: "/mnt/public/wph/models/robotwin2_beat_block_hammer_seed1k_sft_aloha_25chunks_10k"
+    # model_dir:  "/mnt/public/wph/models/pick_dual_bottles_seed1k_sft_aloha_25chunks_10k"
     model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
@@ -132,7 +149,11 @@ actor:
     use_film: False
 
     num_action_chunks: 25
+    # unnorm_key: stack_bowls_two_1k
     unnorm_key: place_empty_cup_1k
+    # unnorm_key: beat_block_hammer_1k
+    # unnorm_key: pick_dual_bottles_1k
+
     center_crop: True
 
     precision: "bf16"

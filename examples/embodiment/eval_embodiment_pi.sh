@@ -23,8 +23,7 @@ export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
 LIBERO_PATH=/opt/libero
-# export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
-export ROBOTWIN_PATH="/mnt/public/wph/codes/RoboTwin_now"
+export ROBOTWIN_PATH="/mnt/mnt/public/yiwei/RoboTwin_now"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 echo "PYTHONPATH: $PYTHONPATH"
 export CUDA_LAUNCH_BLOCKING=1
@@ -35,12 +34,8 @@ export ROBOT_PLATFORM=ALOHA # $ROBOT_PLATFORM
 
 if [ -z "$1" ]; then
     # CONFIG_NAME="maniskill_ppo_openvlaoft"
-    CONFIG_NAME="robotwin_ppo_openvlaoft_eval"
-    # CONFIG_NAME="robotwin_grpo_openvlaoft_copy"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_beat_block_hammer_eval"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_handover_block_eval"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_stack_bowls_two_eval"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_lift_pot_eval"
+    # CONFIG_NAME="robotwin_ppo_openvlaoft_eval"
+    CONFIG_NAME="robotwin_ppo_openpi_eval_place_empty_cup_random"
 else
     CONFIG_NAME=$1
 fi

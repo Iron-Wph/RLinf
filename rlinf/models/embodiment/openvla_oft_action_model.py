@@ -304,7 +304,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                 task_description = env_obs["task_descriptions"][i]
                 image = np.array(env_obs["images"][i])
                 
-                # print(f"debug wph: image shape: {image.shape}", flush=True)
+                print(f"debug wph: image shape: {image.shape}", flush=True)
                 # print("debug wph: [predict_action_batch] image shape before PIL:", image.shape, image.dtype, flush=True)
                 # print("debug wph: [predict_action_batch] image ndim:", getattr(image, "ndim", "NA"), flush=True)
 

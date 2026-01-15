@@ -19,9 +19,9 @@ video_cfg:
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
 # seeds_path: /mnt/public/wph/codes/RLinf/examples/embodiment/config/env/robotwin2_train_seeds.json #${oc.env:EMBODIED_PATH}/config/env/robotwin2_eval_seeds.json
-seeds_path: /mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds.json
+seeds_path: /mnt/mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds.json
 # assets_path: "/mnt/public/wph/codes/RLinf_RoboTwin_gz"
-assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
+assets_path: "/mnt/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
 reward_coef: 5.0
 filter_rewards: True

@@ -278,7 +278,7 @@ class ManiskillEnv(gym.Env):
             raw_chunk_terminations.append(terminations)
             raw_chunk_truncations.append(truncations)
         
-        print(f"debug wph: reward type: {type(chunk_rewards)}, value: {chunk_rewards}, size:{len(chunk_rewards)}, each shape:{chunk_rewards[-1].shape}", flush=True)
+        # print(f"debug wph: reward type: {type(chunk_rewards)}, value: {chunk_rewards}, size:{len(chunk_rewards)}, each shape:{chunk_rewards[-1].shape}", flush=True)
 
         chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
         raw_chunk_terminations = torch.stack(

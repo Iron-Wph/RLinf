@@ -1,43 +1,35 @@
 defaults:
   - env/train: robotwin_single_task
-  - env/eval: robotwin_stack_bowls_two_simple
+  - env/eval: robotwin_single_task
   - override hydra/job_logging: stdout
-
-### for eval
 
 hydra:
   run:
     dir: .
-  output_subdir: null 
+  output_subdir: null
   searchpath:
     - file://${oc.env:EMBODIED_PATH}/config/
-    
+
 cluster:
   num_nodes: 1
   component_placement:
-    # env, rollout, acotr: all
-    env: 0-1
-    rollout: 0-1
-    actor: 0-1
+    actor,env,rollout: all
 
 runner:
   task_type: embodied
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "test_openvla"
+    experiment_name: "test_openpi"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1000
   max_steps: -1
-
   only_eval: True
   val_check_interval: -1
-  save_interval: 10
+  save_interval: 100
   seq_length: 4096
-  # max_prompt_length: 128
-  max_prompt_length: 512
-
+  max_prompt_length: 50
 
 algorithm:
   auto_reset: True
@@ -46,40 +38,41 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  #### 
-  n_chunk_steps: 8 # 20
-  n_eval_chunk_steps: 256   # 128 / 4 = 32, 32 * 8 = 256 traj length for eval
-  num_group_envs: 2
-  rollout_epoch: 1 # 16
-
+  n_chunk_steps: 48
+  n_eval_chunk_steps: 40
+  num_group_envs: 20
+  rollout_epoch: 8
   reward_type: chunk_level
-  logprob_type: token_level
+  logprob_type: chunk_level
   entropy_type: token_level
 
+  update_epoch: 4
   adv_type: gae
   loss_type: actor_critic
-  loss_agg_func: "token-mean"
+  loss_agg_func: "token-mean" 
   kl_beta: 0.0
   entropy_bonus: 0
-  clip_ratio_high: 0.28
+  clip_ratio_high: 0.2
   clip_ratio_low: 0.2
   clip_ratio_c: 3.0
   value_clip: 0.2
   huber_delta: 10.0
 
-
   gamma: 0.99
   gae_lambda: 0.95
 
-  # params for rollout
+  filter_rewards: False
+  rewards_lower_bound: 0.1
+  rewards_upper_bound: 0.9
+  # params for generation
   sampling_params:
-    do_sample: False
     use_greedy: False
-    temperature_train: 1.6
-    temperature_eval: 1.6
-    top_k: -1
+    temperature_train: 1.0
+    temperature_eval: 0.6
+    top_k: 50
     top_p: 1.0
     repetition_penalty: 1.0
+    add_BOS: False
 
   # length argument for autoregressive sampling
   # max length means max amount of tokens to generate
@@ -94,7 +87,7 @@ env:
     name: "env_buffer_list"
     queue_name: "obs_buffer"
     queue_size: 0
-  enable_offload: True
+  enable_offload: False
 
 rollout:
   group_name: "RolloutGroup"
@@ -103,10 +96,12 @@ rollout:
     queue_name: "action_buffer"
     queue_size: 0
   mode: "colocate"
-  backend: "huggingface"
-  model_dir: ${actor.model.model_dir}
+  generation_backend: "huggingface"
+  model_dir: "/mnt/mnt/public/liuzhihao/openpi-main/checkpoints/sft/place_empty_cup_random/place_empty_cup_random/30000"
   precision: ${actor.model.precision}
-  enable_offload: True
+  recompute_logprobs: False
+  unnorm_key: libero_10
+  enable_offload: False
   pipeline_stage_num: 1
 
 actor:
@@ -116,56 +111,45 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  micro_batch_size: 8 # 1
-  global_batch_size: 128 # 640
-  seed: 1234
-  enable_offload: True
+  checkpoint_load_path: "/mnt/mnt/public/liuzhihao/openpi-main/checkpoints/sft/place_empty_cup_random/place_empty_cup_random/30000"
+  checkpoint_save_path: "../results"
+  micro_batch_size: 128
+  global_batch_size: 2048 # maximum : global batch size = micro batch size * actor num_processes.
+  seed: 42
+  enable_offload: False
 
   model:
-    model_dir: "/mnt/public/wph/models/robotwin2_stack_bowls_two_seed1k_sft_aloha_25chunks_40k"
-    model_name: "openvla_oft"
-    value_type: ${algorithm.reward_type}  # 'action' or 'token'
+    model_name: "openpi"
+    precision: null
+    num_action_chunks: 5 # interface for the env
     action_dim: 14
-    use_proprio: True
-    proprio_dim: 14
-    use_film: False
-
-    num_action_chunks: 25
-    unnorm_key: stack_bowls_two_1k
-    center_crop: True
-
-    precision: "bf16"
-    add_bias_linear: False
-    add_qkv_bias: True
-    vocab_size: 32000
-    hidden_size: 4096
-    policy_setup: "widowx_bridge"
-    add_value_head: True
-    image_size: [224, 224]
     is_lora: False
     lora_rank: 32
-    lora_path: null
-    ckpt_path: null
-    num_images_in_input: 1
-    attn_implementation: "flash_attention_2"
-    low_cpu_mem_usage: True
-    trust_remote_code: True
-    gradient_checkpointing: True
+    gradient_checkpointing: False
+    use_wrist_image: True
+    use_proprio: True
+    num_steps: 4
+    add_value_head: True
+    # openpi specific parameters
+    openpi:
+      simulator_type: "robotwin"
+      noise_level: 0.5
+      action_chunk: ${actor.model.num_action_chunks}
+      num_steps: ${actor.model.num_steps}
+      train_expert_only: True
+      action_env_dim: ${actor.model.action_dim}
+      noise_method: "flow_sde"
+      add_value_head: ${actor.model.add_value_head}
+      detach_critic_input: True
 
   optim:
-    lr: 1.0e-4
-    value_lr: 3.0e-3
+    lr: 5.0e-6
+    value_lr: 1.0e-4
     adam_beta1: 0.9
-    adam_beta2: 0.999
+    adam_beta2: 0.95
     adam_eps: 1.0e-05
-    clip_grad: 10.0
-
-  tokenizer:
-    tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: ${actor.model.model_dir}
-    use_fast: False
-    trust_remote_code: True
-    padding_side: "right"
+    clip_grad: 1.0
+    critic_warmup_steps: 0
 
   fsdp_config:                  # below are fsdp configs, for more details, see https://pytorch.org/docs/stable/fsdp.html and https://huggingface.co/docs/accelerate/package_reference/fsdp
 
@@ -175,7 +159,7 @@ actor:
     # "shard_grad_op" (shard gradients and optimizer states only), 
     # "hybrid_shard" (combines data parallelism and model parallelism - sharding within FSDP groups, replicate across DDP groups),
     # "no_shard" (no sharding)
-    sharding_strategy: "full_shard" 
+    sharding_strategy: "no_shard"
 
     cpu_offload: False           # whether to offload parameters and gradients to CPU when not in use，if True, actor's enable_offload should be True too.
     offload_pin_memory: False    # whether FSDP2's CPU offload policy should pin memory when cpu_offload is True

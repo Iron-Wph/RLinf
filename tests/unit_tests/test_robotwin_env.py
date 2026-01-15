@@ -296,11 +296,40 @@ def test_robotwin_env():
 
     print("\n🎉 All tests passed!")
 
+def test_robotwin_env_seed():
+    """Test basic functionality of RoboTwinEnv"""
+    print("Starting RoboTwinEnv tests...")
 
+    # Create configuration
+    cfg = create_test_config()
+
+    # Create environment
+    env = RoboTwinEnv(cfg, seed_offset=0, total_num_processes=1, record_metrics=True)
+    print(f"✓ Environment created successfully, num_envs: {env.num_envs}")
+
+    # Test reset
+    print("Testing reset...")
+    obs, info = env.reset()
+    print(f"✓ Reset successful, observation keys: {obs.keys()}")
+    print(f"  Image shape: {obs['images'].shape}")
+    if obs["wrist_images"] is not None:
+        print(f"  Wrist image shape: {obs['wrist_images'].shape}")
+    print(f"  State shape: {obs['states'].shape}")
+
+
+    # Cleanup
+    env.close(clear_cache=True)
+    print("✓ Environment cleaned up successfully")
+
+    print("\n🎉 All tests passed!")
+    
 if __name__ == "__main__":
     mp.set_start_method("spawn")
     os.environ["CUDA_VISIBLE_DEVICES"] = str(0)
     # test 单步step
     # test_robotwin_env()
     # test chunk step 逻辑
-    test_chunk_step_dones_logic()
+    # test_chunk_step_dones_logic()
+    
+    # test env seed
+    test_robotwin_env_seed()

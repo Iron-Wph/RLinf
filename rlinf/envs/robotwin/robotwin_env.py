@@ -77,8 +77,8 @@ class RoboTwinEnv(gym.Env):
 
         # 实际上就是环境的seed
         env_seeds = self.reset_state_ids.tolist()
-        print(f"debug wph: env_seeds={env_seeds}", flush=True)
-        print(f"debug wph: num_envs={self.num_envs}", flush=True)
+        # print(f"debug wph: env_seeds={env_seeds}", flush=True)
+        # print(f"debug wph: num_envs={self.num_envs}", flush=True)
         
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
@@ -156,6 +156,13 @@ class RoboTwinEnv(gym.Env):
         return np.array(image)
 
     def _extract_obs_image(self, raw_obs):
+        #raw_obs[0] keys=['full_image', 'left_wrist_image', 'right_wrist_image', 'state', 'instruction']
+        #raw_obs[0]['full_image']: shape=(480, 640, 3)
+        #raw_obs[0]['left_wrist_image']: shape=(480, 640, 3),
+        #raw_obs[0]['right_wrist_image']: shape=(480, 640, 3),
+        #raw_obs[0]['state']: shape=(14,),
+        #raw_obs[0]['instruction']: type=<class 'numpy.str_'> len=86 value='Slide the cup with light blue color onto the coaster with circular shape with the arm.'
+
         batch_images = []
         batch_wrist_images = []
         batch_states = []
@@ -171,7 +178,7 @@ class RoboTwinEnv(gym.Env):
                 batch_wrist_images.append(
                     torch.stack([torch.from_numpy(img) for img in wrist_images])
                 )
-            batch_states.append(obs["state"])
+            batch_states.append(obs["state"])         
             batch_instructions.append(obs["instruction"])
 
         batch_images = torch.stack([torch.from_numpy(img) for img in batch_images])
@@ -189,11 +196,17 @@ class RoboTwinEnv(gym.Env):
         batch_states = torch.stack([torch.from_numpy(state) for state in batch_states])
 
         extracted_obs = {
-            "images": batch_images,
-            "wrist_images": batch_wrist_images,
-            "states": batch_states,
-            "task_descriptions": batch_instructions,
+            "images": batch_images, #Tensor[B, H, W, C]
+            "wrist_images": batch_wrist_images, #Tensor[B, 2, H, W, C]
+            "states": batch_states, #Tensor[B, 14]
+            "task_descriptions": batch_instructions, #List[str]
         }
+        # extracted_obs keys=['images', 'wrist_images', 'states', 'task_descriptions']
+        # extracted_obs['images']: shape=(2, 224, 224, 3),
+        # extracted_obs['wrist_images']: shape=(2, 2, 224, 224, 3),
+        # extracted_obs['states']: shape=(2, 14),
+        # extracted_obs['task_descriptions']: ["String", "String"]
+
         return extracted_obs
 
     def _calc_step_reward(self, terminations):
@@ -238,6 +251,8 @@ class RoboTwinEnv(gym.Env):
 
         env_seeds = self.reset_state_ids.tolist() if env_seeds is None else env_seeds
 
+        print(f"debug wph: env_seed_len={len(env_seeds)}, env_seeds={env_seeds}", flush=True)
+        
         self.venv.reset(env_idx=env_idx, env_seeds=env_seeds)
         raw_obs = self.venv.get_obs()
         infos = {}
@@ -324,7 +339,7 @@ class RoboTwinEnv(gym.Env):
     def chunk_step(self, chunk_actions):
         if isinstance(chunk_actions, torch.Tensor):
             chunk_actions = chunk_actions.cpu().numpy()
-
+        
         # chunk_actions: [num_envs, chunk_step, action_dim]
         num_envs = chunk_actions.shape[0]
         chunk_step = chunk_actions.shape[1]

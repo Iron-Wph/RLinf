@@ -127,6 +127,15 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         self._output_transform = _transforms.compose(output_transforms)
 
     def input_transform(self, obs: dict, transpose=True):
+
+    #   dict keys=['observation/image', 'observation/state', 'prompt']
+    #   observation/image: dict keys=['cam_high', 'cam_left_wrist', 'cam_right_wrist']
+    #   to_process_obs.observation/image.cam_high: Tensor shape=(2, 3, 224, 224)
+    #   to_process_obs.observation/image.cam_left_wrist: Tensor shape=(2, 3, 224, 224)
+    #   to_process_obs.observation/image.cam_right_wrist: Tensor shape=(2, 3, 224, 224)
+    #   to_process_obs.observation/state: Tensor shape=(2, 32)
+    #   to_process_obs.prompt: str len=24
+
         inputs = jax.tree.map(lambda x: x, obs)
         # process input
         first_process = "prompt" in inputs.keys()
@@ -143,26 +152,52 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         inputs = jax.tree.map(
             lambda x: np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x, inputs
         )
-        batch_size = next(v.shape[0] for v in inputs.values() if hasattr(v, "shape"))
+        
+        # 处理字典格式的图像输入
+        if "observation/image" in inputs and isinstance(inputs["observation/image"], dict):
+            # 字典格式：{"cam_high": [B, C, H, W], "cam_left_wrist": [B, C, H, W], ...}
+            batch_size = next(v.shape[0] for v in inputs["observation/image"].values() if hasattr(v, "shape"))
+        else:
+            batch_size = next(v.shape[0] for v in inputs.values() if hasattr(v, "shape"))
+        
         # split & transform
         transformed_samples = []
         for i in range(batch_size):
-            sample = jax.tree.map(lambda x: x[i], inputs)
-            # convert from [3,256,256] -> [256,256,3]
-            if transpose:
-                sample = jax.tree.map(
-                    lambda x: x.transpose(1, 2, 0)
-                    if len(x.shape) == 3 and transpose
-                    else x,
-                    sample,
-                )
-            else:
-                sample = jax.tree.map(lambda x: x if len(x.shape) == 3 else x, sample)
+            sample = {}
+            for key, value in inputs.items():
+                if key == "observation/image" and isinstance(value, dict):
+                    # 处理字典格式的图像：每个相机图像单独提取
+                    sample[key] = {cam_name: img[i] for cam_name, img in value.items()}
+                else:
+                    sample[key] = value[i] if hasattr(value, "__getitem__") else value
+            
+            # 对于字典格式的图像，已经是 CHW 格式，不需要转置
+            # 对于其他格式，根据 transpose 参数决定
+            if transpose and "observation/image" in sample:
+                if isinstance(sample["observation/image"], dict):
+                    # 字典格式已经是 CHW，不需要转置
+                    pass
+                else:
+                    # 单个图像格式，需要转置
+                    sample = jax.tree.map(
+                        lambda x: x.transpose(1, 2, 0)
+                        if len(x.shape) == 3 and transpose and x.shape[0] == 3
+                        else x,
+                        sample,
+                    )
+            
             if first_process:
                 sample["prompt"] = obs["prompt"][i]
             else:
                 sample["prompt"] = "xxxx"
             transformed_sample = self._input_transform(sample)
+
+    #   transformed_sample: dict keys=['image', 'image_mask', 'state', 'tokenized_prompt', 'tokenized_prompt_mask']
+    #   Key 'image': Dict with keys ['base_0_rgb', 'left_wrist_0_rgb', 'right_wrist_0_rgb']
+    #   Key 'base_0_rgb': Shape torch.Size([224, 224, 3]), Dtype torch.uint8
+    #   Key 'left_wrist_0_rgb': Shape torch.Size([224, 224, 3]), Dtype torch.uint8
+    #   Key 'right_wrist_0_rgb': Shape torch.Size([224, 224, 3]), Dtype torch.uint8
+
             transformed_samples.append(transformed_sample)
         # recombine
         inputs = jax.tree.map(
@@ -181,7 +216,11 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         transformed_samples = []
         for i in range(batch_size):
             sample = jax.tree.map(lambda x: np.asarray(x[i].detach().cpu()), outputs)
+            # [DEBUG] 打印应用 _output_transform 之前的数据
+            # print(f"[DEBUG Output] Before _output_transform: keys={list(sample.keys())}, actions range=[{sample['actions'].min():.4f}, {sample['actions'].max():.4f}]")
             sample = self._output_transform(sample)
+            # [DEBUG] 打印应用 _output_transform 之后的数据
+            # print(f"[DEBUG Output] After _output_transform: keys={list(sample.keys())}, actions range=[{sample['actions'].min():.4f}, {sample['actions'].max():.4f}]")
             transformed_samples.append(sample)
         # recombine
         outputs = jax.tree.map(
@@ -248,16 +287,38 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         }
 
     def input_processor(self, env_processed_obs):
+        # keys= ['images', 'wrist_images', 'states', 'task_descriptions']
+        # images: shape=(2, 224, 224, 3)
+        # wrist_images: shape=(2, 2, 224, 224, 3)
+        # states: shape=(2, 14)
+        # task_descriptions: shape=(2,)
+
+        # 将 images 和 wrist_images 重新组织成 aloha 期望的字典格式
+        # images: [B, H, W, C] -> 需要转换为字典，每个图像 [C, H, W]
+        # wrist_images: [B, 2, H, W, C] -> 需要拆分为 left 和 right，每个 [C, H, W]
+
+        batch_size = env_processed_obs["images"].shape[0]
+        images_dict = {}
+        
+        # cam_high: [B, H, W, C] -> [B, C, H, W]
+        cam_high = env_processed_obs["images"].permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+        images_dict["cam_high"] = cam_high
+        
+        # wrist_images: [B, 2, H, W, C] -> left: [B, C, H, W], right: [B, C, H, W]
+        if env_processed_obs["wrist_images"] is not None:
+            wrist_images = env_processed_obs["wrist_images"]  # [B, 2, H, W, C]
+            cam_left_wrist = wrist_images[:, 0, :, :, :].permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+            cam_right_wrist = wrist_images[:, 1, :, :, :].permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+            images_dict["cam_left_wrist"] = cam_left_wrist
+            images_dict["cam_right_wrist"] = cam_right_wrist
+        
         to_process_obs = {
-            "observation/image": env_processed_obs["images"],
+            "observation/image": images_dict,  # dict with keys: cam_high, cam_left_wrist, cam_right_wrist
             "observation/state": env_processed_obs["states"],
             "prompt": env_processed_obs["task_descriptions"],
         }
-        if self.config.simulator_type == "libero":
-            to_process_obs["observation/wrist_image"] = env_processed_obs[
-                "wrist_images"
-            ]
-        processed_obs = self.input_transform(to_process_obs)
+
+        processed_obs = self.input_transform(to_process_obs, transpose=False)
         device = next(self.parameters()).device
         for key, value in processed_obs.items():
             if isinstance(value, list):
@@ -275,7 +336,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                         device=device
                     ).contiguous()
         return processed_obs
-
+    
     def predict_action_batch(
         self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
     ) -> tuple[np.ndarray, dict[str, Any]]:

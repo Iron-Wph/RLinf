@@ -1,14 +1,20 @@
 #! /bin/bash
+export HYDRA_FULL_ERROR=1
+# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export EMBODIED_PATH="$( cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export REPO_PATH=$(dirname $(dirname "$EMBODIED_PATH"))
-export SRC_FILE="${EMBODIED_PATH}/eval_embodied_agent.py"
+export SRC_FILE="${EMBODIED_PATH}/train_embodied_agent.py"
 
-# export MUJOCO_GL="osmesa"
-# export PYOPENGL_PLATFORM="osmesa"
 export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
-export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
+
+# NOTE: set LIBERO_REPO_PATH to the path of the LIBERO repo
+export LIBERO_REPO_PATH="/opt/libero"
+
+# export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
+export ROBOTWIN_PATH="/mnt/public/wph/codes/RoboTwin_now"
+export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
 # Base path to the BEHAVIOR dataset, which is the BEHAVIOR-1k repo's dataset folder
 # Only required when running the behavior experiment.
@@ -22,32 +28,24 @@ export ISAAC_PATH=${ISAAC_PATH:-/path/to/isaac-sim}
 export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
-LIBERO_PATH=/opt/libero
-# export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
-export ROBOTWIN_PATH="/mnt/public/wph/codes/RoboTwin_now"
-export PYTHONPATH=${REPO_PATH}:${LIBERO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
-echo "PYTHONPATH: $PYTHONPATH"
-export CUDA_LAUNCH_BLOCKING=1
-export HYDRA_FULL_ERROR=1
-
 # NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
 export ROBOT_PLATFORM=ALOHA # $ROBOT_PLATFORM
 
 if [ -z "$1" ]; then
     # CONFIG_NAME="maniskill_ppo_openvlaoft"
-    CONFIG_NAME="robotwin_ppo_openvlaoft_eval"
-    # CONFIG_NAME="robotwin_grpo_openvlaoft_copy"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_beat_block_hammer_eval"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_handover_block_eval"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_stack_bowls_two_eval"
-    # CONFIG_NAME="robotwin_ppo_openvlaoft_lift_pot_eval"
+    # CONFIG_NAME="robotwin_ppo_openvlaoft_train_place_empty_cup_simple"
+    CONFIG_NAME="robotwin_grpo_openvlaoft_copy"
+
 else
     CONFIG_NAME=$1
 fi
 
-LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
-MEGA_LOG_FILE="${LOG_DIR}/eval_embodiment.log"
+echo "Using Python at $(which python)"
+# LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
+LOG_DIR="${REPO_PATH}/logs/pick_dual_bottles"
+
+MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
 CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
-echo ${CMD}
-${CMD} 2>&1 | tee ${MEGA_LOG_FILE}
+echo ${CMD} > ${MEGA_LOG_FILE}
+${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
