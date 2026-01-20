@@ -4,15 +4,16 @@ export HF_ENDPOINT=https://hf-mirror.com
 export EMBODIED_PATH="$( cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export REPO_PATH=$(dirname $(dirname "$EMBODIED_PATH"))
 export SRC_FILE="${EMBODIED_PATH}/eval_embodied_agent.py"
+export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
 export CUDA_LAUNCH_BLOCKING=1
 export HYDRA_FULL_ERROR=1
 
-EVAL_NAME=YOUR_EVAL_NAME
-CKPT_PATH=YOUR_CKPT_PATH           # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
-CONFIG_NAME=YOUR_CFG_NAME          # env.eval must be maniskill_ood_template
-TOTAL_NUM_ENVS=YOUR_TOTAL_NUM_ENVS # total number of evaluation environments
-EVAL_ROLLOUT_EPOCH=YOUR_EVAL_ROLLOUT_EPOCH # eval rollout epoch, total_trajectory_num = eval_rollout_epoch * total_num_envs
+EVAL_NAME=150_step_ckpt
+CKPT_PATH=/mnt/public/peihong/codes/RLinf_maniskill_pi/logs/test_maniskill_ppo_openpi_pi05/maniskill_ppo_openpi_pi05/checkpoints/global_step_150/actor/full_weights.pt           # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
+CONFIG_NAME=maniskill_ppo_openpi_pi05_eval          # env.eval must be maniskill_ood_template
+TOTAL_NUM_ENVS=256 # total number of evaluation environments
+EVAL_ROLLOUT_EPOCH=1 # eval rollout epoch, total_trajectory_num = eval_rollout_epoch * total_num_envs
 
 for env_id in \
     "PutOnPlateInScene25VisionImage-v1" "PutOnPlateInScene25VisionTexture03-v1" "PutOnPlateInScene25VisionTexture05-v1" \
