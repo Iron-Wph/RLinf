@@ -182,9 +182,14 @@ def _gripper_from_angular_inv(value):
 def _decode_aloha(data: dict, *, adapt_to_pi: bool = False) -> dict:
     # state is [left_arm_joint_angles, left_arm_gripper, right_arm_joint_angles, right_arm_gripper]
     # dim sizes: [6, 1, 6, 1]
+    print(f"debug wph: _decode_aloha data keys: {data.keys()}", flush=True)
+    # print(f"debug wph: _decode_aloha images keys: {data['observation/image'].keys()}", flush=True)
+    print(f"debug wph: adapt_to_pi={adapt_to_pi}", flush=True)
+    
     state = np.asarray(data["state"])
+    print(f"debug wph: _decode_aloha before decode state shape: {state.shape}, dtype: {state.dtype}, values: {state}", flush=True)
     state = _decode_state(state, adapt_to_pi=adapt_to_pi)
-
+    print(f"debug wph: _decode_aloha after decode state shape: {state.shape}, dtype: {state.dtype}, values: {state}", flush=True)
     def convert_image(img):
         img = np.asarray(img)
         # Convert to uint8 if using float images.
@@ -195,7 +200,9 @@ def _decode_aloha(data: dict, *, adapt_to_pi: bool = False) -> dict:
 
     images = data["images"]
     images_dict = {name: convert_image(img) for name, img in images.items()}
-
+    for k, v in images_dict.items():
+        print(f"debug wph: _decode_aloha check_image {k} shape: {v.shape}", flush=True)
+        # print(f"debug wph: _decode_aloha check_image {k} value: {v}", flush=True)
     data["images"] = images_dict
     data["state"] = state
     return data
@@ -206,7 +213,8 @@ def _decode_state(state: np.ndarray, *, adapt_to_pi: bool = False) -> np.ndarray
         # Flip the joints.
         state = _joint_flip_mask() * state
         # Reverse the gripper transformation that is being applied by the Aloha runtime.
-        state[[6, 13]] = _gripper_to_angular(state[[6, 13]])
+        # 为了适配SFT和RL时维度不一样的情况，RL时多个bsz
+        state[:, [6, 13]] = _gripper_to_angular(state[:, [6, 13]])
     return state
 
 

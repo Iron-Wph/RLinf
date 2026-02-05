@@ -169,6 +169,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
     ):
         self._input_transform = _transforms.compose(transforms)
         self._output_transform = _transforms.compose(output_transforms)
+        
+        print(f"debug wph: self._input_transform: {self._input_transform}", flush=True)
+        print(f"debug wph: self._output_transform: {self._output_transform}", flush=True)
+        
 
     def input_transform(self, obs: dict, transpose=True):
         inputs = jax.tree.map(lambda x: x, obs)
@@ -294,23 +298,45 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         }
 
     def obs_processor(self, env_obs):
-        # base observation
-        processed_obs = {
-            "observation/image": env_obs["main_images"],
-            "prompt": env_obs["task_descriptions"],
-        }
-        # state observation
-        if "calvin" in self.config.config_name:
-            state = env_obs["states"]
-            processed_obs["observation/state_ee_pos"] = state[:, :3]
-            processed_obs["observation/state_ee_rot"] = state[:, 3:6]
-            processed_obs["observation/state_gripper"] = state[:, 6:7]
-        else:
-            processed_obs["observation/state"] = env_obs["states"]
-        # wrist image observation
-        if env_obs["wrist_images"] is not None:
-            processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
-        # store used keys
+        print(f"debug wph: obs_processor env_obs keys: {env_obs.keys()}", flush=True)
+        print(f"debug wph: self.config.config_name: {self.config.config_name}", flush=True)
+        if "robotwin" in self.config.config_name:
+            processed_obs = {
+                "images": {},
+                "prompt": env_obs["task_descriptions"],
+                'state': env_obs["states"],
+            }
+            print(f"debug wph: obs_processor states.shape: {env_obs['states'].shape}", flush=True)
+            # [b, h, w, c] -> [c, h, w]
+            print(f"debug wph: obs_processor main_images.shape: {env_obs['main_images'].shape}", flush=True)
+            print(f"debug wph: obs_processor wrist_images.shape: {env_obs['wrist_images'].shape}", flush=True)
+            print(f"debug wph: obs_processor extra_view_images.shape: {env_obs['extra_view_images'].shape}", flush=True)
+            
+            processed_obs["images"]["cam_high"] = env_obs["main_images"].permute(0,3,1,2)
+            # [b, h, w, c] -> [c, h, w]
+            if env_obs["wrist_images"] is not None:
+                processed_obs["images"]["cam_left_wrist"] = env_obs["wrist_images"].permute(0,3,1,2)
+            # [b, h, w, c] -> [c, h, w]
+            if env_obs["extra_view_images"] is not None:
+                processed_obs["images"]["cam_right_wrist"] = env_obs["extra_view_images"].permute(0,3,1,2)
+        else: 
+            # base observation
+            processed_obs = {
+                "observation/image": env_obs["main_images"],
+                "prompt": env_obs["task_descriptions"],
+            }
+            # state observation
+            if "calvin" in self.config.config_name:
+                state = env_obs["states"]
+                processed_obs["observation/state_ee_pos"] = state[:, :3]
+                processed_obs["observation/state_ee_rot"] = state[:, 3:6]
+                processed_obs["observation/state_gripper"] = state[:, 6:7]
+            else:
+                processed_obs["observation/state"] = env_obs["states"]
+            # wrist image observation
+            if env_obs["wrist_images"] is not None:
+                processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
+            # store used keys
         return processed_obs
 
     def precision_processor(self, processed_obs):

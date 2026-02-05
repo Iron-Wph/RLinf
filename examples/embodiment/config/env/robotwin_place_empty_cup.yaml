@@ -8,6 +8,7 @@ reward_coef: 1.0
 use_custom_reward: True
 use_rel_reward: True
 
+center_crop: False
 seed: 0
 group_size: 1
 use_fixed_reset_state_ids: False

@@ -74,6 +74,7 @@ class EnvOutput:
         )
 
     def prepare_observations(self, obs: dict[str, Any]) -> dict[str, Any]:
+        print(f"debug wph: prepare_observations obs keys: {obs.keys()}", flush=True)
         image_tensor = obs["main_images"] if "main_images" in obs else None
         wrist_image_tensor = obs["wrist_images"] if "wrist_images" in obs else None
         extra_view_image_tensor = (
@@ -94,7 +95,7 @@ class EnvOutput:
 
     def to_dict(self):
         env_output_dict = {}
-
+        print(f"debug wph: to_dict obs keys: {self.obs.keys()}", flush=True)
         env_output_dict["obs"] = self.prepare_observations(self.obs)
         env_output_dict["final_obs"] = (
             self.prepare_observations(self.final_obs)
