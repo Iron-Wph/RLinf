@@ -168,11 +168,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         output_transforms: Sequence[_transforms.DataTransformFn] = (),
     ):
         self._input_transform = _transforms.compose(transforms)
-        self._output_transform = _transforms.compose(output_transforms)
-        
-        print(f"debug wph: self._input_transform: {self._input_transform}", flush=True)
-        print(f"debug wph: self._output_transform: {self._output_transform}", flush=True)
-        
+        self._output_transform = _transforms.compose(output_transforms)        
 
     def input_transform(self, obs: dict, transpose=True):
         inputs = jax.tree.map(lambda x: x, obs)
@@ -298,27 +294,18 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         }
 
     def obs_processor(self, env_obs):
-        print(f"debug wph: obs_processor env_obs keys: {env_obs.keys()}", flush=True)
-        print(f"debug wph: self.config.config_name: {self.config.config_name}", flush=True)
         if "robotwin" in self.config.config_name:
             processed_obs = {
                 "images": {},
                 "prompt": env_obs["task_descriptions"],
                 'state': env_obs["states"],
             }
-            print(f"debug wph: obs_processor states.shape: {env_obs['states'].shape}", flush=True)
-            # [b, h, w, c] -> [c, h, w]
-            print(f"debug wph: obs_processor main_images.shape: {env_obs['main_images'].shape}", flush=True)
-            print(f"debug wph: obs_processor wrist_images.shape: {env_obs['wrist_images'].shape}", flush=True)
-            print(f"debug wph: obs_processor extra_view_images.shape: {env_obs['extra_view_images'].shape}", flush=True)
-            
-            processed_obs["images"]["cam_high"] = env_obs["main_images"].permute(0,3,1,2)
-            # [b, h, w, c] -> [c, h, w]
+            # [b, h, w, c] -> [c, h, w]           
+            processed_obs["images"]["cam_high"] = env_obs["main_images"].permute(0,3,1,2).contiguous()
             if env_obs["wrist_images"] is not None:
-                processed_obs["images"]["cam_left_wrist"] = env_obs["wrist_images"].permute(0,3,1,2)
-            # [b, h, w, c] -> [c, h, w]
+                processed_obs["images"]["cam_left_wrist"] = env_obs["wrist_images"].permute(0,3,1,2).contiguous()
             if env_obs["extra_view_images"] is not None:
-                processed_obs["images"]["cam_right_wrist"] = env_obs["extra_view_images"].permute(0,3,1,2)
+                processed_obs["images"]["cam_right_wrist"] = env_obs["extra_view_images"].permute(0,3,1,2).contiguous()
         else: 
             # base observation
             processed_obs = {
@@ -364,22 +351,26 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         mode: Literal["train", "eval"] = "train",
         compute_values=True,
         **kwargs,
-    ) -> tuple[np.ndarray, dict[str, Any]]:
+    ) -> tuple[np.ndarray, dict[str, Any]]:       
         to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
+        
         processed_obs = self.input_transform(
             to_process_obs, transpose=False
-        )  # policy input obs -> model input obs
+        )  # policy input obs -> model input obs       
+        
         processed_obs = self.precision_processor(
             processed_obs
         )  # obs precision processor
+        
         observation = _model.Observation.from_dict(processed_obs)
         outputs = self.sample_actions(
             observation, mode=mode, compute_values=compute_values
         )
+        
         actions = self.output_transform(
             {"actions": outputs["actions"], "state": observation.state}
         )["actions"].numpy()
-
+        
         forward_inputs = {
             "chains": outputs["chains"],
             "denoise_inds": outputs["denoise_inds"],

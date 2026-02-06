@@ -36,8 +36,8 @@ task_config:
   episode_num: 100
   use_seed: false
   save_freq: 15
-  embodiment: [piper, piper, 0.6]
-  # embodiment: [aloha-agilex]
+  # embodiment: [piper, piper, 0.6]
+  embodiment: [aloha-agilex]
   language_num: 100
   domain_randomization:
     random_background: false

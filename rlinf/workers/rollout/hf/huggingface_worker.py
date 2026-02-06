@@ -133,7 +133,6 @@ class MultiStepRolloutWorker(Worker):
             kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
 
         with torch.no_grad():
-            print(f"debug wph: env_obs keys: {env_obs.keys()}", flush=True)
             actions, result = self.hf_model.predict_action_batch(
                 env_obs=env_obs,
                 **kwargs,

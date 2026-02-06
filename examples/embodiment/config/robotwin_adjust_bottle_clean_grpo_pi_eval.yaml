@@ -15,7 +15,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor, env, rollout: 4-7
+    actor, env, rollout: 0-3
 
 runner:
   task_type: embodied
@@ -33,8 +33,8 @@ runner:
   save_interval: 20
 
   resume_dir: null # Optional: path to a saved checkpoint directory, such as 'checkpoints/global_step_10'. If not None, it will be used to resume training.
+  ckpt_path: /mnt/public/peihong/codes/RLinf-PI/logs/test_robotwin_sft_openpi/pi0_base_robotwin_adjust_bottle_clean/checkpoints/global_step_20000/model.pt
   # ckpt_path: /mnt/public/peihong/models/pi0_base_robotwin_place_empty_cup/checkpoints/global_step_16000/model.pt  # Optional: path to a .pt checkpoint. If not None, it will be loaded after the model is instantiated (for evaluation).
-
 algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
@@ -94,7 +94,7 @@ env:
     max_steps_per_rollout_epoch: 400
     group_size: ${algorithm.group_size}
     assets_path: "/mnt/public/peihong/codes/RoboTwin_main"
-    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
+    # seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
 
   eval:
     total_num_envs: 64
@@ -107,7 +107,7 @@ env:
     use_fixed_reset_state_ids: True
     is_eval: True
     assets_path: "/mnt/public/peihong/codes/RoboTwin_main"
-    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
+    # seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
@@ -132,8 +132,8 @@ actor:
 
   # Override the default values in model/openvla_oft
   model:
-    # model_path: "/mnt/public/peihong/models/pi0_base_robotwin_place_empty_cup/checkpoints/global_step_16000/actor/model"
-    model_path: /mnt/public/peihong/codes/RLinf-PI/logs/test_robotwin_sft_openpi/pi0_base_robotwin_adjust_bottle_clean/checkpoints/global_step_10000/actor/model
+    model_path: /mnt/public/peihong/models/pi0_base
+    # model_path: /mnt/public/peihong/codes/RLinf-PI/logs/test_robotwin_sft_openpi/pi0_base_robotwin_adjust_bottle_clean/checkpoints/global_step_20000/actor/model
     num_action_chunks: 50 # interface for the env
     action_dim: 14
     use_proprio: True

@@ -1,5 +1,5 @@
 defaults:
-  - model/openvla_oft@model
+  - model/pi0@model
   - override hydra/job_logging: stdout
 
 hydra:
