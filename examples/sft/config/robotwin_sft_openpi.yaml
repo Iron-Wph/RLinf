@@ -1,0 +1,96 @@
+defaults:
+  - model/pi0@actor.model
+  - training_backend/fsdp@actor.fsdp_config
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor,env,rollout: 0-0
+
+runner:
+  task_type: sft
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "pi0_base_robotwin_test"
+    logger_backends: ["tensorboard"] # wandb, swanlab
+    # swanlab_mode: "local"
+
+  max_epochs: 30000
+  max_steps: -1
+  val_check_interval: -1
+  save_interval: 5000
+
+  resume_dir: null
+
+data:
+  # data_path: "/mnt/mnt/public/wph/codes/Robotwin/policy/pi0/processed_data"
+  # data_path: "/mnt/mnt/public/wph/codes/Robotwin/data"
+  # data_path: "/mnt/mnt/public/yiwei/data"
+  data_path: /mnt/project_rlinf_hs/wph/codes/RoboTwin_main/data
+algorithm:
+  adv_type: gae
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 64
+  global_batch_size: 256
+  seed: 0
+
+  # Override the default values in model/pi0
+  model:
+    precision: null
+    # model_path: "/mnt/mnt/public/chenkang/openpi-main/checkpoints/torch/pi0_base"
+    # model_path: "/mnt/mnt/public/yiwei/pi0_base"
+    model_path: /mnt/project_rlinf_hs/wph/models/models/pi0_base
+    # model_path: "/mnt/mnt/public/yiwei/RLinf-PI/logs/20251229-10:10:57/pi0_base_robotwin_place_empty_cup-aloha-4gpu_batch256/checkpoints/global_step_6000/actor/model"
+    num_action_chunks: 50 # interface for the env
+    action_dim: 14
+    add_value_head: True
+    openpi:
+      config_name: "pi0_aloha_robotwin"
+      detach_critic_input: True
+      num_images_in_input: 3
+      train_expert_only: True
+
+  optim:
+    # 优化器参数
+    lr: 2.5e-5
+    value_lr: 1.55e-4     # robotwin没有该参数
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-08
+    weight_decay: 1e-10
+    clip_grad: 1.0
+    # 学习率调度器
+    total_training_steps: 30000
+    lr_warmup_steps: 1000
+    lr_scheduler: "cosine"
+    num_cycles: 0.5
+    min_lr: 2.5e-6
+
+  # Override the default values in training_backend/fsdp
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    use_orig_params: True
+    gradient_checkpointing: False # for openpi, gradient checkpointing is not supported, please do not change this value
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
+
+reward:
+  use_reward_model: False
+
+critic:
+  use_critic_model: False
