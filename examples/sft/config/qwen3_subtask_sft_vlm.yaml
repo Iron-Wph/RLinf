@@ -38,11 +38,8 @@ data:
   apply_chat_template: True
   use_chat_template: True
   # replace paths with your own dataset files
-  # train_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/task-0000/subtask_sft_train.parquet
-  # eval_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/task-0000/subtask_sft_eval.parquet
-  # train_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/all_train.parquet
-  # eval_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/all_eval.parquet
-  eval_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/task-0005/subtask_sft_eval.parquet
+  train_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/all_train.parquet
+  eval_data_paths: /mnt/project_rlinf_hs/wph/datasets/behaviour/all_eval.parquet
 
   # free-text subtask generation fields
   prompt_key: "task_instruction"
