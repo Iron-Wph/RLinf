@@ -682,3 +682,143 @@ class Robo2VLMSFTDataset(Robo2VLMDataset):
             label_mask,
             multi_modal_inputs,
         )
+
+
+@VLMDatasetRegistry.register("robo2vlm_subtask_sft")
+class Robo2VLMSubtaskSFTDataset(Robo2VLMSFTDataset):
+    """VLM SFT dataset for subtask generation from multi-image states.
+
+    Expected raw fields:
+    - images via config.data.image_keys, e.g. ["initial_image", "current_image"]
+    - prompt via config.data.prompt_key, e.g. "task_instruction"
+    - answer via config.data.answer_key, e.g. "subtask_instruction"
+    """
+
+    def __init__(
+        self,
+        data_paths: Union[list[str], str],
+        config: DictConfig,
+        tokenizer: AutoTokenizer,
+        eval_dataset: bool = False,
+    ) -> None:
+        super().__init__(data_paths, config, tokenizer, eval_dataset=eval_dataset)
+        self.system_prompt = config.data.get(
+            "system_prompt",
+            "You are a robotic assistant specialized in subtask planning. I will provide you with:\n"
+            "1. global_task: A global task instruction describing the final goal.\n"
+            "2. initial_observation: An image of the initial state of the environment.\n"
+            "3. current_observation: An image of the current state of the environment.\n\n"
+            "Format:\n"
+            "<global_task>: {global task instruction}.\n"
+            "<initial_observation>: {initial observation image}.\n"
+            "<current_observation>: {current observation image}.\n\n"
+            "Based on the current observation and the final task instruction, determine the subtask that the robot is currently executing.\n\n"
+            "IMPORTANT:\n"
+            "- The subtask should reflect the current action being performed, not a future step.\n"
+            "- The description must be concise and atomic.\n"
+            "- Do not include unnecessary details or explanations.\n\n"
+            "Output format:\n"
+            "current_subtask: {short subtask description}.",
+        )
+
+    def _to_image_obj(self, image: Any) -> Optional[Image.Image]:
+        if isinstance(image, Image.Image):
+            return image.convert("RGB")
+
+        if isinstance(image, dict) and "bytes" in image:
+            image = image["bytes"]
+
+        if isinstance(image, (bytes, bytearray)):
+            return Image.open(BytesIO(image)).convert("RGB")
+
+        if isinstance(image, str) and os.path.exists(image):
+            return Image.open(image).convert("RGB")
+
+        return None
+
+    def encode_prompt(
+        self, raw: dict[str, Any]
+    ) -> tuple[torch.Tensor, int, dict[str, Any], torch.Tensor, Optional[str]]:
+        task_instruction = raw.get(self.prompt_key, None)
+        assert task_instruction is not None, f"{self.prompt_key} is required"
+
+        answer = raw.get(self.answer_key, None)
+        assert answer is not None, f"{self.answer_key} is required"
+
+        answer = str(answer).strip()
+        assert answer, f"{self.answer_key} must be non-empty"
+
+        images = self.get_image_list(raw)
+        images_inputs = [img for img in (self._to_image_obj(v) for v in images) if img]
+        assert len(images_inputs) > 0, (
+            "No valid images found from image_keys. "
+            f"Configured image_keys={self.image_keys}"
+        )
+
+        user_text = (
+            f"<global_task>: {task_instruction}\n"
+            "<initial_observation>: provided as the first image.\n"
+            "<current_observation>: provided as the second image.\n\n"
+            "Please output only:\n"
+            "current_subtask: {short subtask description}."
+        )
+
+        image_context = [{"type": "image", "image": img} for img in images_inputs]
+        image_context.append({"type": "text", "text": user_text})
+
+        prompt_messages = []
+        if self.system_prompt:
+            prompt_messages.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": self.system_prompt}],
+                }
+            )
+        prompt_messages.append({"role": "user", "content": image_context})
+
+        prompt = [
+            (
+                *prompt_messages,
+                {"role": "assistant", "content": [{"type": "text", "text": answer}]},
+            )
+        ]
+        without_assistant_prompt = [tuple(prompt_messages)]
+
+        prompt_inputs = self.vlm_vision_convert(prompt, images_inputs)
+        label_prompt_inputs = self.vlm_vision_convert(
+            without_assistant_prompt, images_inputs
+        )
+
+        if self.eval_dataset:
+            input_ids = label_prompt_inputs.pop("input_ids")
+            attention_mask = label_prompt_inputs.pop("attention_mask")
+            label_mask = attention_mask
+        else:
+            input_ids = prompt_inputs.pop("input_ids")
+            attention_mask = prompt_inputs.pop("attention_mask")
+            label_mask = label_prompt_inputs.pop("attention_mask")
+
+        if isinstance(input_ids, torch.Tensor):
+            if input_ids.dim() == 2 and input_ids.size(0) == 1:
+                input_ids = input_ids.squeeze(0)
+            input_ids = input_ids.to(dtype=torch.long)
+        else:
+            input_ids = torch.tensor(input_ids, dtype=torch.long)
+
+        multi_modal_inputs = {}
+        if self.eval_dataset:
+            for k, v in label_prompt_inputs.items():
+                multi_modal_inputs[k] = v
+        else:
+            for k, v in prompt_inputs.items():
+                multi_modal_inputs[k] = v
+
+        return (
+            input_ids,
+            int(input_ids.numel()),
+            prompt,
+            answer,
+            attention_mask,
+            label_mask,
+            multi_modal_inputs,
+        )

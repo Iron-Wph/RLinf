@@ -29,6 +29,7 @@ from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
 class FSDPVlmSftWorker(FSDPSftWorker):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
+        self._eval_print_count = 0
 
     def _save_data_state(self, save_path: str):
         state = {
@@ -249,6 +250,8 @@ class FSDPVlmSftWorker(FSDPSftWorker):
     def get_eval_model_output(self, batch: dict[str, Any]):
         # hundle the input batch
         correct = 0
+        max_print = int(self.cfg.data.get("eval_print_max_samples", 0))
+        print_preds = bool(self.cfg.data.get("eval_print_predictions", False))
         input_ids = batch["prompt"].to(self.device)
         answers = batch["answer"]
         attention_mask = batch["attention_mask"].to(self.device)
@@ -285,6 +288,19 @@ class FSDPVlmSftWorker(FSDPSftWorker):
 
             pred_text = self._extract_answer(full_pred_text)
             gold_text = answers[i]
+
+            if (
+                print_preds
+                and self._rank == 0
+                and self._eval_print_count < max_print
+            ):
+                logging.info(
+                    "[EVAL_PRED] idx=%d pred=%s gold=%s",
+                    self._eval_print_count,
+                    pred_text,
+                    gold_text,
+                )
+                self._eval_print_count += 1
 
             if self._normalize_text(pred_text) == self._normalize_text(gold_text):
                 correct += 1
