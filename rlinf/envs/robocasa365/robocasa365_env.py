@@ -15,6 +15,7 @@
 """RoboCasa365 environment wrapper for RLinf."""
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,10 @@ import torch
 from omegaconf import OmegaConf
 
 from rlinf.envs.robocasa.venv import RobocasaSubprocEnv
+from rlinf.envs.robocasa365.eval_schedule import (
+    resolve_robocasa365_episode_horizons,
+    validate_robocasa365_eval_horizons,
+)
 from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 from rlinf.utils.debug_dump import dump_pt
 
@@ -459,6 +464,9 @@ class Robocasa365Env(gym.Env):
                 "task_filter": self.task_filter,
                 "task_sampling_strategy": self.task_sampling_strategy,
                 "rotate_tasks_on_auto_reset": self.rotate_tasks_on_auto_reset,
+                "episode_horizon_source": str(
+                    self.cfg.get("episode_horizon_source", "max_episode_steps")
+                ),
                 "seed_strategy": self.seed_strategy,
                 "is_eval": bool(self.cfg.get("is_eval", False)),
             },
@@ -466,6 +474,32 @@ class Robocasa365Env(gym.Env):
 
         self.task_specs = self._load_task_specs()
         self.num_tasks = len(self.task_specs)
+        self.episode_horizon_source = str(
+            self.cfg.get("episode_horizon_source", "max_episode_steps")
+        )
+        selected_episode_horizons = resolve_robocasa365_episode_horizons(
+            task_horizons=(task_spec["horizon"] for task_spec in self.task_specs),
+            max_episode_steps=int(self.cfg.get("max_episode_steps", 300)),
+            episode_horizon_source=self.episode_horizon_source,
+        )
+        if bool(self.cfg.get("is_eval", False)):
+            max_episode_horizon = validate_robocasa365_eval_horizons(
+                episode_horizons=selected_episode_horizons,
+                max_steps_per_rollout_epoch=int(
+                    self.cfg.get("max_steps_per_rollout_epoch", 300)
+                ),
+            )
+            self._debug_log_event(
+                "eval_horizons_validated",
+                {
+                    "episode_horizon_source": self.episode_horizon_source,
+                    "selected_episode_horizons": list(selected_episode_horizons),
+                    "max_episode_horizon": max_episode_horizon,
+                    "max_steps_per_rollout_epoch": int(
+                        self.cfg.get("max_steps_per_rollout_epoch", 300)
+                    ),
+                },
+            )
         self._debug_log_event(
             "task_specs_loaded",
             {
@@ -569,6 +603,63 @@ class Robocasa365Env(gym.Env):
         if self._debug_include_full_ep_meta:
             payload["ep_meta"] = ep_meta
         return payload
+
+    @staticmethod
+    def _debug_sha256(value: Any) -> str:
+        encoded = json.dumps(
+            _debug_jsonable(value),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _debug_scene_fingerprint(
+        self,
+        raw_obs: dict[str, Any],
+        ep_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        main_camera_key = self._get_obs_key(
+            "main_camera_key", "robot0_agentview_left_image"
+        )
+        main_image = raw_obs.get(main_camera_key)
+        ep_meta_sha256 = self._debug_sha256(ep_meta)
+        main_image_coarse_sha256 = None
+        main_image_coarse_shape = None
+
+        if main_image is not None:
+            image = np.asarray(main_image)
+            if image.ndim == 3 and image.shape[0] <= 4 and image.shape[-1] > 4:
+                image = np.moveaxis(image, 0, -1)
+            if image.ndim >= 2:
+                height, width = image.shape[:2]
+                row_ids = np.linspace(
+                    0, height - 1, num=min(16, height), dtype=np.int32
+                )
+                col_ids = np.linspace(
+                    0, width - 1, num=min(16, width), dtype=np.int32
+                )
+                sampled = image[np.ix_(row_ids, col_ids)]
+                if np.issubdtype(sampled.dtype, np.floating):
+                    sampled = np.nan_to_num(sampled)
+                    if sampled.size and float(sampled.max()) <= 1.0:
+                        sampled = sampled * 255.0
+                sampled = np.clip(sampled, 0, 255).astype(np.uint8, copy=False)
+                quantized = sampled // 16
+                main_image_coarse_shape = list(quantized.shape)
+                main_image_coarse_sha256 = hashlib.sha256(
+                    quantized.tobytes()
+                ).hexdigest()
+
+        scene_sha256 = hashlib.sha256(
+            f"{ep_meta_sha256}:{main_image_coarse_sha256}".encode("ascii")
+        ).hexdigest()
+        return {
+            "ep_meta_sha256": ep_meta_sha256,
+            "main_image_coarse_sha256": main_image_coarse_sha256,
+            "main_image_coarse_shape": main_image_coarse_shape,
+            "scene_sha256": scene_sha256,
+        }
 
     def _load_task_specs(self) -> list[dict[str, Any]]:
         return load_robocasa365_task_specs(self.cfg)
@@ -723,11 +814,16 @@ class Robocasa365Env(gym.Env):
             for task_id in self.task_ids
         ]
         fallback_horizon = int(self.cfg.get("max_episode_steps", 300))
+        registry_horizons = [
+            int(self.task_specs[task_id].get("horizon", fallback_horizon))
+            for task_id in self.task_ids
+        ]
         self.task_horizons = np.asarray(
-            [
-                int(self.task_specs[task_id].get("horizon", fallback_horizon))
-                for task_id in self.task_ids
-            ],
+            resolve_robocasa365_episode_horizons(
+                task_horizons=registry_horizons,
+                max_episode_steps=fallback_horizon,
+                episode_horizon_source=self.episode_horizon_source,
+            ),
             dtype=np.int32,
         )
 
@@ -1040,6 +1136,10 @@ class Robocasa365Env(gym.Env):
                         ],
                         "seed": self.env_seeds[target_env_id],
                         **self._debug_ep_meta_payload(ep_meta),
+                        **self._debug_scene_fingerprint(
+                            raw_obs[local_i],
+                            ep_meta,
+                        ),
                     }
                 )
             self._reset_counts[target_env_id] += 1
@@ -1243,7 +1343,11 @@ class Robocasa365Env(gym.Env):
                 past_dones.cpu().numpy(), obs_list[-1], infos_list[-1]
             )
 
-        if self.auto_reset or self.ignore_terminations:
+        if (
+            self.auto_reset
+            or self.ignore_terminations
+            or bool(self.cfg.get("is_eval", False))
+        ):
             chunk_terminations = torch.zeros_like(raw_chunk_terminations)
             chunk_terminations[:, -1] = past_terminations
 

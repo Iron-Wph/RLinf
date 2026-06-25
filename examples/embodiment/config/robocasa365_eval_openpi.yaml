@@ -105,8 +105,12 @@ env:
     task_sampling_strategy: ordered
     auto_reset: False
     ignore_terminations: False
+    episode_horizon_source: task_horizon
+    # Used only by max_episode_steps mode or as a registry fallback.
     max_episode_steps: 700
-    max_steps_per_rollout_epoch: 700
+    # task_horizon mode still needs the rollout budget to cover the largest selected
+    # RoboCasa365 registry horizon because generic workers read this value directly.
+    max_steps_per_rollout_epoch: 900
     group_size: 1
     is_eval: True
     parallel_eval:
