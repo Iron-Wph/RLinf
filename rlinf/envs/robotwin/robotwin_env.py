@@ -88,6 +88,15 @@ class RoboTwinEnv(gym.Env):
             n_envs=self.num_envs,
             env_seeds=env_seeds,
         )
+        self.action_dim = int(self.venv.args["action_dim"])
+
+    def _validate_action_dim(self, actions):
+        if actions.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"RoboTwin action dimension mismatch for task {self.task_name}: "
+                f"expected {self.action_dim}, got {actions.shape[-1]}. "
+                "Check actor.model.action_dim and task_config.embodiment/single_arm."
+            )
 
     @property
     def device(self):
@@ -271,6 +280,7 @@ class RoboTwinEnv(gym.Env):
         if len(actions.shape) == 2:
             # [n_envs, action_dim] -> [n_envs, 1, action_dim]
             actions = actions[:, None, :]
+        self._validate_action_dim(actions)
 
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
             actions
@@ -322,6 +332,7 @@ class RoboTwinEnv(gym.Env):
             chunk_actions = chunk_actions.cpu().numpy()
 
         # chunk_actions: [num_envs, chunk_step, action_dim]
+        self._validate_action_dim(chunk_actions)
         num_envs = chunk_actions.shape[0]
         chunk_step = chunk_actions.shape[1]
         obs_list = []
