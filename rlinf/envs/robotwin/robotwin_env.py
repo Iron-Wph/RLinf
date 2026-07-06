@@ -65,6 +65,7 @@ class RoboTwinEnv(gym.Env):
         self._init_reset_state_ids()
 
         self._init_env()
+        self._init_policy_adapter()
 
         self.prev_step_reward = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
@@ -90,13 +91,124 @@ class RoboTwinEnv(gym.Env):
         )
         self.action_dim = int(self.venv.args["action_dim"])
 
-    def _validate_action_dim(self, actions):
-        if actions.shape[-1] != self.action_dim:
+    def _init_policy_adapter(self):
+        adapter_cfg = self.cfg.get("policy_adapter", {}) or {}
+        self.policy_action_dim = int(adapter_cfg.get("action_dim", self.action_dim))
+        self.policy_state_dim = int(adapter_cfg.get("state_dim", self.action_dim))
+        self.action_adapter = adapter_cfg.get("action", None)
+        self.state_adapter = adapter_cfg.get("state", None)
+        self.wrist_image_adapter = adapter_cfg.get("wrist_images", None)
+        self.policy_adapter_arm = adapter_cfg.get(
+            "arm", self.cfg.task_config.get("active_arm", "right")
+        )
+        self.franka_joint7_default = float(adapter_cfg.get("franka_joint7", 0.0))
+        self._last_env_states = None
+
+    def _validate_policy_action_dim(self, actions):
+        if actions.shape[-1] != self.policy_action_dim:
             raise ValueError(
                 f"RoboTwin action dimension mismatch for task {self.task_name}: "
-                f"expected {self.action_dim}, got {actions.shape[-1]}. "
-                "Check actor.model.action_dim and task_config.embodiment/single_arm."
+                f"expected policy action dim {self.policy_action_dim}, "
+                f"got {actions.shape[-1]}. Check actor.model.action_dim."
             )
+
+    def _validate_env_action_dim(self, actions):
+        if actions.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"RoboTwin env action dimension mismatch for task {self.task_name}: "
+                f"expected env action dim {self.action_dim}, got {actions.shape[-1]}. "
+                "Check task_config.embodiment/single_arm and policy_adapter.action."
+            )
+
+    def _remember_env_states(self, extracted_obs):
+        self._last_env_states = extracted_obs["states"].detach().clone()
+
+    def _adapt_obs_for_policy(self, extracted_obs):
+        self._remember_env_states(extracted_obs)
+        if self.state_adapter is None and self.wrist_image_adapter is None:
+            return extracted_obs
+
+        obs = extracted_obs.copy()
+        if self.state_adapter == "franka8_to_aloha14_smoke":
+            states = obs["states"]
+            if states.shape[-1] != 8:
+                raise ValueError(
+                    f"franka8_to_aloha14_smoke expects 8D Franka states, got {states.shape[-1]}D"
+                )
+            aloha_states = torch.zeros(
+                (*states.shape[:-1], 14), dtype=states.dtype, device=states.device
+            )
+            if self.policy_adapter_arm == "left":
+                aloha_states[..., :6] = states[..., :6]
+                aloha_states[..., 6] = states[..., 7]
+            elif self.policy_adapter_arm == "right":
+                aloha_states[..., 7:13] = states[..., :6]
+                aloha_states[..., 13] = states[..., 7]
+            else:
+                raise ValueError(
+                    f"policy_adapter.arm must be 'left' or 'right', got {self.policy_adapter_arm}"
+                )
+            obs["states"] = aloha_states
+        elif self.state_adapter is not None:
+            raise ValueError(f"Unsupported RoboTwin state adapter: {self.state_adapter}")
+
+        if self.wrist_image_adapter == "duplicate_to_two":
+            obs["wrist_images"] = self._duplicate_wrist_images_to_two(
+                obs["wrist_images"], obs["main_images"]
+            )
+        elif self.wrist_image_adapter is not None:
+            raise ValueError(
+                f"Unsupported RoboTwin wrist image adapter: {self.wrist_image_adapter}"
+            )
+        return obs
+
+    def _duplicate_wrist_images_to_two(self, wrist_images, main_images):
+        if wrist_images is None:
+            zeros = torch.zeros_like(main_images)
+            return torch.stack((zeros, zeros), dim=1)
+        if wrist_images.shape[1] == 1:
+            return wrist_images.repeat(1, 2, 1, 1, 1)
+        if wrist_images.shape[1] > 2:
+            return wrist_images[:, :2]
+        return wrist_images
+
+    def _adapt_actions_for_env(self, actions):
+        if self.action_adapter is None:
+            self._validate_env_action_dim(actions)
+            return actions
+
+        if self.action_adapter != "aloha14_to_franka8_smoke":
+            raise ValueError(f"Unsupported RoboTwin action adapter: {self.action_adapter}")
+        if actions.shape[-1] != 14:
+            raise ValueError(
+                f"aloha14_to_franka8_smoke expects 14D policy actions, got {actions.shape[-1]}D"
+            )
+        if self.action_dim != 8:
+            raise ValueError(
+                f"aloha14_to_franka8_smoke can only target 8D Franka env actions, got {self.action_dim}D"
+            )
+
+        adapted_actions = np.zeros((*actions.shape[:-1], 8), dtype=actions.dtype)
+        if self.policy_adapter_arm == "left":
+            arm_slice = slice(0, 6)
+            gripper_idx = 6
+        elif self.policy_adapter_arm == "right":
+            arm_slice = slice(7, 13)
+            gripper_idx = 13
+        else:
+            raise ValueError(
+                f"policy_adapter.arm must be 'left' or 'right', got {self.policy_adapter_arm}"
+            )
+
+        adapted_actions[..., :6] = actions[..., arm_slice]
+        if self._last_env_states is not None:
+            joint7 = self._last_env_states[:, 6].cpu().numpy()
+            adapted_actions[..., 6] = joint7[:, None]
+        else:
+            adapted_actions[..., 6] = self.franka_joint7_default
+        adapted_actions[..., 7] = actions[..., gripper_idx]
+        self._validate_env_action_dim(adapted_actions)
+        return adapted_actions
 
     @property
     def device(self):
@@ -261,7 +373,7 @@ class RoboTwinEnv(gym.Env):
 
         self._reset_metrics(env_idx)
 
-        extracted_obs = self._extract_obs_image(raw_obs)
+        extracted_obs = self._adapt_obs_for_policy(self._extract_obs_image(raw_obs))
 
         return extracted_obs, infos
 
@@ -280,12 +392,13 @@ class RoboTwinEnv(gym.Env):
         if len(actions.shape) == 2:
             # [n_envs, action_dim] -> [n_envs, 1, action_dim]
             actions = actions[:, None, :]
-        self._validate_action_dim(actions)
+        self._validate_policy_action_dim(actions)
+        env_actions = self._adapt_actions_for_env(actions)
 
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
-            actions
+            env_actions
         )
-        extracted_obs = self._extract_obs_image(raw_obs)
+        extracted_obs = self._adapt_obs_for_policy(self._extract_obs_image(raw_obs))
         infos = list_of_dict_to_dict_of_list(info_list)
 
         if isinstance(terminations, list):
@@ -306,7 +419,7 @@ class RoboTwinEnv(gym.Env):
                     device=self.device,
                 )
 
-        self._elapsed_steps += actions.shape[1]
+        self._elapsed_steps += env_actions.shape[1]
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
@@ -332,16 +445,17 @@ class RoboTwinEnv(gym.Env):
             chunk_actions = chunk_actions.cpu().numpy()
 
         # chunk_actions: [num_envs, chunk_step, action_dim]
-        self._validate_action_dim(chunk_actions)
+        self._validate_policy_action_dim(chunk_actions)
+        env_chunk_actions = self._adapt_actions_for_env(chunk_actions)
         num_envs = chunk_actions.shape[0]
         chunk_step = chunk_actions.shape[1]
         obs_list = []
         infos_list = []
 
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
-            chunk_actions
+            env_chunk_actions
         )
-        extracted_obs = self._extract_obs_image(raw_obs)
+        extracted_obs = self._adapt_obs_for_policy(self._extract_obs_image(raw_obs))
         infos = list_of_dict_to_dict_of_list(info_list)
         obs_list.append(extracted_obs)
         infos_list.append(infos)
@@ -367,7 +481,7 @@ class RoboTwinEnv(gym.Env):
             step_reward, chunk_step, terminations, infos
         )
 
-        self._elapsed_steps += chunk_actions.shape[1]
+        self._elapsed_steps += env_chunk_actions.shape[1]
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
