@@ -132,6 +132,8 @@ class MultiStepRolloutWorker(Worker):
         assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
         self.env_decoupled_mode = env_mode == "decoupled"
         self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
+        self.dst_ranks = {}
+        self.src_ranks = {}
         if self.env_decoupled_mode:
             if self.placement.get_world_size("rollout") > 1:
                 # when the rollout worker num is greater than 1, the env worker num should be greater than 1
@@ -160,10 +162,6 @@ class MultiStepRolloutWorker(Worker):
             self.log_info(
                 f"decoupled model rollout worker initialized with batch_size_map: {self.batch_size_map}"
             )
-
-            # use for evaluation
-            self.dst_ranks = {}
-            self.src_ranks = {}
         else:
             if not self.cfg.runner.only_eval:
                 self.dst_ranks = {
