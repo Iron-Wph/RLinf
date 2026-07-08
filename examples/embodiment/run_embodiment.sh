@@ -52,6 +52,8 @@ echo "Using Python at $(which python)"
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}" #/$(date +'%Y%m%d-%H:%M:%S')"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
+export ROBOTWIN_DEBUG_LOG_PATH=${ROBOTWIN_DEBUG_LOG_PATH:-"${LOG_DIR}/robotwin_debug.jsonl"}
 CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
 echo ${CMD} > ${MEGA_LOG_FILE}
+echo "ROBOTWIN_DEBUG_LOG_PATH=${ROBOTWIN_DEBUG_LOG_PATH}" | tee -a ${MEGA_LOG_FILE}
 ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
