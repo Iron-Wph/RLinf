@@ -319,7 +319,6 @@ _CONFIGS = [
         data=LeRobotRobotwinFrankaDataConfig(
             repo_id="robotwin/stack_blocks_two_franka_300",
             base_config=DataConfig(
-                local_files_only=True,
                 prompt_from_task=True,
             ),
             assets=AssetsConfig(

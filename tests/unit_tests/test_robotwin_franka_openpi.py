@@ -16,10 +16,18 @@ import pytest
 
 pytest.importorskip("openpi")
 
+from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config  # noqa: E402
 from rlinf.models.embodiment.openpi.policies.robotwin_franka_policy import (  # noqa: E402
     RobotwinFrankaInputs,
     RobotwinFrankaOutputs,
 )
+
+
+def test_robotwin_franka_openpi_config_is_registered():
+    config = get_openpi_config("pi0_base_franka_robotwin_full")
+
+    assert config.data.repo_id == "robotwin/stack_blocks_two_franka_300"
+    assert config.data.base_config.prompt_from_task is True
 
 
 def test_robotwin_franka_inputs_pad_qpos_and_mask_missing_right_wrist():
