@@ -62,6 +62,9 @@ from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.robotwin_franka_dataconfig import (
+    LeRobotRobotwinFrankaDataConfig,
+)
 
 _CONFIGS = [
     TrainConfig(
@@ -302,6 +305,27 @@ _CONFIGS = [
                 assets_dir="checkpoints/torch/pi0_aloha_robotwin/assets"
             ),
             extra_delta_transform=True,  # True for delta action, False for abs_action
+        ),
+        freeze_filter=pi0_config.Pi0Config().get_freeze_filter(),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_base_franka_robotwin_full",
+        model=pi0_config.Pi0Config(
+            action_horizon=50,
+            discrete_state_input=False,
+        ),
+        data=LeRobotRobotwinFrankaDataConfig(
+            repo_id="robotwin/stack_blocks_two_franka_300",
+            base_config=DataConfig(
+                local_files_only=True,
+                prompt_from_task=True,
+            ),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi0_base_franka_robotwin_full/assets"
+            ),
+            extra_delta_transform=True,
         ),
         freeze_filter=pi0_config.Pi0Config().get_freeze_filter(),
         pytorch_weight_path="checkpoints/torch/pi0_base",
