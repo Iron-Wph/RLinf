@@ -30,6 +30,24 @@ def _raw_observation(state=None):
     }
 
 
+def test_franka_single_arm_vector_env_contract_rejects_non_8d_action_dim():
+    env = _make_env_wrapper(single_arm=True)
+    env.venv = type(
+        "DummyVectorEnv",
+        (),
+        {"args": {"single_arm": True, "active_arm": "left", "action_dim": 14}},
+    )()
+    env.action_dim = 14
+    task_config = {
+        "embodiment": ["franka-panda"],
+        "single_arm": True,
+        "active_arm": "left",
+    }
+
+    with pytest.raises(ValueError, match="action_dim=8"):
+        env._validate_vector_env_contract(task_config)
+
+
 @pytest.mark.parametrize(
     ("active_arm", "expected_pixel"),
     [("left", 11), ("right", 22)],

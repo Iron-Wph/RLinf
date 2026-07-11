@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import inspect
 import json
 import os
 from typing import Optional, Union
@@ -87,6 +88,9 @@ class RoboTwinEnv(gym.Env):
         task_config = OmegaConf.to_container(self.cfg.task_config, resolve=True)
         if bool(task_config.get("single_arm", False)):
             task_config.setdefault("active_arm", "left")
+        self.vector_env_file = inspect.getsourcefile(VectorEnv) or inspect.getfile(
+            VectorEnv
+        )
 
         self.venv = VectorEnv(
             task_config=task_config,
@@ -96,6 +100,32 @@ class RoboTwinEnv(gym.Env):
         # VectorEnv is the source of truth for the action layout.  In particular,
         # a single-arm Franka-Panda environment exposes 7 joints + 1 gripper.
         self.action_dim = int(self.venv.args["action_dim"])
+        self._validate_vector_env_contract(task_config)
+
+    @staticmethod
+    def _is_franka_single_arm_task(task_config: dict) -> bool:
+        embodiment = task_config.get("embodiment", [])
+        if isinstance(embodiment, str):
+            embodiment = [embodiment]
+        return bool(task_config.get("single_arm", False)) and "franka-panda" in embodiment
+
+    def _validate_vector_env_contract(self, task_config: dict) -> None:
+        if not self._is_franka_single_arm_task(task_config):
+            return
+
+        expected_action_dim = 8
+        vector_env_single_arm = bool(self.venv.args.get("single_arm", False))
+        active_arm = self.venv.args.get("active_arm", task_config.get("active_arm"))
+        if not vector_env_single_arm or self.action_dim != expected_action_dim:
+            raise ValueError(
+                "RoboTwin VectorEnv did not expose the single-arm Franka layout "
+                f"for task {self.task_name}: expected single_arm=True and "
+                f"action_dim={expected_action_dim}, got "
+                f"single_arm={vector_env_single_arm}, action_dim={self.action_dim}, "
+                f"active_arm={active_arm}. Check the loaded RoboTwin code and "
+                f"assets: vector_env_file={self.vector_env_file}, ROBOTWIN_PATH, "
+                "PYTHONPATH, and task_config.embodiment/single_arm/active_arm."
+            )
 
     def _validate_action_dim(self, actions: np.ndarray) -> None:
         """Ensure policy actions match the action layout exposed by RoboTwin."""
@@ -112,11 +142,18 @@ class RoboTwinEnv(gym.Env):
         if not bool(self.cfg.task_config.get("single_arm", False)):
             return
 
+        expected_state_dim = (
+            8
+            if self._is_franka_single_arm_task(
+                OmegaConf.to_container(self.cfg.task_config, resolve=True)
+            )
+            else self.action_dim
+        )
         state_shape = np.asarray(state).shape
-        if state_shape != (self.action_dim,):
+        if state_shape != (expected_state_dim,):
             raise ValueError(
                 f"RoboTwin single-arm state dimension mismatch for task "
-                f"{self.task_name}: expected shape ({self.action_dim},), got "
+                f"{self.task_name}: expected shape ({expected_state_dim},), got "
                 f"{state_shape}. This usually means RLinf loaded a RoboTwin "
                 "package that does not support task_config.single_arm; check "
                 "ROBOTWIN_PATH/PYTHONPATH and robotwin.envs.vector_env.__file__."
