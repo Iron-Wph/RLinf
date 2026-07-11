@@ -74,6 +74,12 @@ env:
     seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
     center_crop: false
     task_config:
+      embodiment: [franka-panda]
+      single_arm: true
+      active_arm: right
+      dual_arm: false
+      planner_backend: mplib
+      step_lim: 800
       camera:
         collect_wrist_camera: true
 
@@ -95,6 +101,12 @@ env:
       save_video: true
       video_base_dir: ${runner.logger.log_path}/video/eval
     task_config:
+      embodiment: [franka-panda]
+      single_arm: true
+      active_arm: right
+      dual_arm: false
+      planner_backend: mplib
+      step_lim: 800
       camera:
         collect_wrist_camera: true
 
