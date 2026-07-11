@@ -90,6 +90,19 @@ class RoboTwinEnv(gym.Env):
             n_envs=self.num_envs,
             env_seeds=env_seeds,
         )
+        # VectorEnv is the source of truth for the action layout.  In particular,
+        # a single-arm Franka-Panda environment exposes 7 joints + 1 gripper.
+        self.action_dim = int(self.venv.args["action_dim"])
+
+    def _validate_action_dim(self, actions: np.ndarray) -> None:
+        """Ensure policy actions match the action layout exposed by RoboTwin."""
+        if actions.shape[-1] != self.action_dim:
+            raise ValueError(
+                f"RoboTwin action dimension mismatch for task {self.task_name}: "
+                f"expected {self.action_dim}, got {actions.shape[-1]}. "
+                "Check actor.model.action_dim and "
+                "task_config.embodiment/single_arm."
+            )
 
     @property
     def device(self):
@@ -165,23 +178,38 @@ class RoboTwinEnv(gym.Env):
         batch_wrist_images = []
         batch_states = []
         batch_instructions = []
+        task_config = self.cfg.task_config
+        single_arm = bool(task_config.get("single_arm", False))
+        active_arm = task_config.get("active_arm", "right")
+        if single_arm and active_arm not in ("left", "right"):
+            raise ValueError(f"active_arm must be 'left' or 'right', got {active_arm}")
+
         for obs in raw_obs:
             batch_images.append(
                 self.center_and_crop(obs["full_image"], center_crop=self.center_crop)
             )
             wrist_images = []
-            if "left_wrist_image" in obs and obs["left_wrist_image"] is not None:
-                wrist_images.append(
-                    self.center_and_crop(
-                        obs["left_wrist_image"], center_crop=self.center_crop
+            if single_arm:
+                wrist_key = f"{active_arm}_wrist_image"
+                if obs.get(wrist_key, None) is not None:
+                    wrist_images.append(
+                        self.center_and_crop(
+                            obs[wrist_key], center_crop=self.center_crop
+                        )
                     )
-                )
-            if "right_wrist_image" in obs and obs["right_wrist_image"] is not None:
-                wrist_images.append(
-                    self.center_and_crop(
-                        obs["right_wrist_image"], center_crop=self.center_crop
+            else:
+                if "left_wrist_image" in obs and obs["left_wrist_image"] is not None:
+                    wrist_images.append(
+                        self.center_and_crop(
+                            obs["left_wrist_image"], center_crop=self.center_crop
+                        )
                     )
-                )
+                if "right_wrist_image" in obs and obs["right_wrist_image"] is not None:
+                    wrist_images.append(
+                        self.center_and_crop(
+                            obs["right_wrist_image"], center_crop=self.center_crop
+                        )
+                    )
             if len(wrist_images) > 0:
                 batch_wrist_images.append(
                     torch.stack([torch.from_numpy(img) for img in wrist_images])
@@ -273,6 +301,7 @@ class RoboTwinEnv(gym.Env):
         if len(actions.shape) == 2:
             # [n_envs, action_dim] -> [n_envs, 1, action_dim]
             actions = actions[:, None, :]
+        self._validate_action_dim(actions)
 
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
             actions
@@ -324,6 +353,7 @@ class RoboTwinEnv(gym.Env):
             chunk_actions = chunk_actions.cpu().numpy()
 
         # chunk_actions: [num_envs, chunk_step, action_dim]
+        self._validate_action_dim(chunk_actions)
         num_envs = chunk_actions.shape[0]
         chunk_step = chunk_actions.shape[1]
         obs_list = []
@@ -412,7 +442,7 @@ class RoboTwinEnv(gym.Env):
             self.venv.close(clear_cache)
 
     def sample_action_space(self):
-        return np.random.randn(self.num_envs, self.horizon, 14)
+        return np.random.randn(self.num_envs, 1, self.action_dim)
 
     def _init_reset_state_ids(self):
         if self.cfg.get("seeds_path", None) is not None and os.path.exists(
