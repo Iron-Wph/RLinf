@@ -10,11 +10,27 @@ from rlinf.envs.robotwin.robotwin_env import RoboTwinEnv  # noqa: E402
 def _make_env_wrapper(*, single_arm: bool, active_arm: str = "left") -> RoboTwinEnv:
     env = RoboTwinEnv.__new__(RoboTwinEnv)
     env.cfg = OmegaConf.create(
-        {"task_config": {"single_arm": single_arm, "active_arm": active_arm}}
+        {
+            "task_config": {
+                "embodiment": ["franka-panda"],
+                "single_arm": single_arm,
+                "active_arm": active_arm,
+            }
+        }
     )
     env.center_crop = False
     env.task_name = "stack_blocks_two"
-    env.action_dim = 8
+    env.is_franka_single_arm = single_arm
+    env.active_arm = active_arm
+    env.action_dim = 8 if single_arm else 16
+    env.env_action_dim = env.action_dim
+    env.vector_env_file = "/tmp/robotwin/envs/vector_env.py"
+    env._last_raw_states = None
+    env.venv = type(
+        "DummyVectorEnv",
+        (),
+        {"args": {"single_arm": single_arm, "active_arm": active_arm}},
+    )()
     return env
 
 
@@ -30,22 +46,29 @@ def _raw_observation(state=None):
     }
 
 
-def test_franka_single_arm_vector_env_contract_rejects_non_8d_action_dim():
+def test_franka_single_arm_observation_projects_legacy_dual_franka_state():
     env = _make_env_wrapper(single_arm=True)
-    env.venv = type(
-        "DummyVectorEnv",
-        (),
-        {"args": {"single_arm": True, "active_arm": "left", "action_dim": 14}},
-    )()
-    env.action_dim = 14
-    task_config = {
-        "embodiment": ["franka-panda"],
-        "single_arm": True,
-        "active_arm": "left",
-    }
+    observation = _raw_observation(state=np.arange(16, dtype=np.float32))
 
-    with pytest.raises(ValueError, match="action_dim=8"):
-        env._validate_vector_env_contract(task_config)
+    extracted = env._extract_obs_image([observation])
+
+    assert extracted["states"].shape == (1, 8)
+    assert np.all(extracted["states"][0].numpy() == np.arange(8, dtype=np.float32))
+
+
+def test_franka_single_arm_action_can_expand_to_legacy_dual_franka_action():
+    env = _make_env_wrapper(single_arm=True)
+    env.venv.args["single_arm"] = False
+    env.env_action_dim = 16
+    env._last_raw_states = np.arange(16, dtype=np.float32)[None, :]
+
+    env_action = env._adapt_actions_for_venv(
+        np.ones((1, 2, 8), dtype=np.float32)
+    )
+
+    assert env_action.shape == (1, 2, 16)
+    assert np.all(env_action[..., :8] == 1.0)
+    assert np.all(env_action[:, :, 8:16] == np.arange(8, 16, dtype=np.float32))
 
 
 @pytest.mark.parametrize(
@@ -66,10 +89,17 @@ def test_single_arm_observation_keeps_only_active_wrist_camera(
 
 def test_single_arm_observation_defaults_to_left_arm():
     env = RoboTwinEnv.__new__(RoboTwinEnv)
-    env.cfg = OmegaConf.create({"task_config": {"single_arm": True}})
+    env.cfg = OmegaConf.create(
+        {"task_config": {"embodiment": ["franka-panda"], "single_arm": True}}
+    )
     env.center_crop = False
     env.task_name = "stack_blocks_two"
+    env.is_franka_single_arm = True
+    env.active_arm = "left"
     env.action_dim = 8
+    env.env_action_dim = 8
+    env.vector_env_file = "/tmp/robotwin/envs/vector_env.py"
+    env._last_raw_states = None
 
     observation = env._extract_obs_image([_raw_observation()])
 
@@ -79,23 +109,26 @@ def test_single_arm_observation_defaults_to_left_arm():
 
 def test_single_arm_observation_rejects_legacy_dual_arm_state_vector():
     env = _make_env_wrapper(single_arm=True)
-    observation = _raw_observation(state=np.arange(16, dtype=np.float32))
+    observation = _raw_observation(state=np.arange(14, dtype=np.float32))
 
-    with pytest.raises(ValueError, match="does not support task_config.single_arm"):
+    with pytest.raises(ValueError, match="expected shape"):
         env._extract_obs_image([observation])
 
 
 def test_dual_arm_observation_keeps_both_wrist_cameras():
     env = _make_env_wrapper(single_arm=False)
 
-    observation = env._extract_obs_image([_raw_observation()])
+    observation = env._extract_obs_image(
+        [_raw_observation(state=np.arange(16, dtype=np.float32))]
+    )
 
+    assert observation["states"].shape == (1, 16)
     assert observation["wrist_images"].shape == (1, 2, 4, 6, 3)
     assert np.all(observation["wrist_images"][0, 0].numpy() == 11)
     assert np.all(observation["wrist_images"][0, 1].numpy() == 22)
 
 
-def test_single_arm_action_validation_uses_vector_env_dimension():
+def test_single_arm_action_validation_uses_policy_dimension():
     env = _make_env_wrapper(single_arm=True)
 
     env._validate_action_dim(np.zeros((2, 1, 8), dtype=np.float32))

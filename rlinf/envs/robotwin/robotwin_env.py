@@ -97,10 +97,12 @@ class RoboTwinEnv(gym.Env):
             n_envs=self.num_envs,
             env_seeds=env_seeds,
         )
-        # VectorEnv is the source of truth for the action layout.  In particular,
-        # a single-arm Franka-Panda environment exposes 7 joints + 1 gripper.
-        self.action_dim = int(self.venv.args["action_dim"])
-        self._validate_vector_env_contract(task_config)
+        self.env_action_dim = int(self.venv.args["action_dim"])
+        self.is_franka_single_arm = self._is_franka_single_arm_task(task_config)
+        self.active_arm = task_config.get("active_arm", "left")
+        # Policy-facing single-arm Franka layout is always 7 joints + 1 gripper.
+        self.action_dim = 8 if self.is_franka_single_arm else self.env_action_dim
+        self._last_raw_states = None
 
     @staticmethod
     def _is_franka_single_arm_task(task_config: dict) -> bool:
@@ -108,24 +110,6 @@ class RoboTwinEnv(gym.Env):
         if isinstance(embodiment, str):
             embodiment = [embodiment]
         return bool(task_config.get("single_arm", False)) and "franka-panda" in embodiment
-
-    def _validate_vector_env_contract(self, task_config: dict) -> None:
-        if not self._is_franka_single_arm_task(task_config):
-            return
-
-        expected_action_dim = 8
-        vector_env_single_arm = bool(self.venv.args.get("single_arm", False))
-        active_arm = self.venv.args.get("active_arm", task_config.get("active_arm"))
-        if not vector_env_single_arm or self.action_dim != expected_action_dim:
-            raise ValueError(
-                "RoboTwin VectorEnv did not expose the single-arm Franka layout "
-                f"for task {self.task_name}: expected single_arm=True and "
-                f"action_dim={expected_action_dim}, got "
-                f"single_arm={vector_env_single_arm}, action_dim={self.action_dim}, "
-                f"active_arm={active_arm}. Check the loaded RoboTwin code and "
-                f"assets: vector_env_file={self.vector_env_file}, ROBOTWIN_PATH, "
-                "PYTHONPATH, and task_config.embodiment/single_arm/active_arm."
-            )
 
     def _validate_action_dim(self, actions: np.ndarray) -> None:
         """Ensure policy actions match the action layout exposed by RoboTwin."""
@@ -137,27 +121,72 @@ class RoboTwinEnv(gym.Env):
                 "task_config.embodiment/single_arm."
             )
 
-    def _validate_observation_state_dim(self, state: np.ndarray) -> None:
-        """Ensure single-arm RoboTwin already returns the active-arm state."""
-        if not bool(self.cfg.task_config.get("single_arm", False)):
-            return
+    def _project_franka_single_arm_state(self, state: np.ndarray) -> np.ndarray:
+        state = np.asarray(state, dtype=np.float32)
+        if not self.is_franka_single_arm:
+            return state
 
-        expected_state_dim = (
-            8
-            if self._is_franka_single_arm_task(
-                OmegaConf.to_container(self.cfg.task_config, resolve=True)
-            )
-            else self.action_dim
+        if state.shape == (8,):
+            return state
+        if state.shape == (16,):
+            if self.active_arm == "left":
+                return state[:8]
+            if self.active_arm == "right":
+                return state[8:16]
+            raise ValueError(f"active_arm must be 'left' or 'right', got {self.active_arm}")
+
+        raise ValueError(
+            f"RoboTwin single-arm Franka state dimension mismatch for task "
+            f"{self.task_name}: expected shape (8,) or legacy dual-Franka shape "
+            f"(16,), got {state.shape}. Check vector_env_file={self.vector_env_file}, "
+            "ROBOTWIN_PATH/PYTHONPATH, and task_config.embodiment/single_arm/active_arm."
         )
+
+    def _validate_observation_state_dim(self, state: np.ndarray) -> None:
+        """Ensure policy-facing observations match the action layout."""
         state_shape = np.asarray(state).shape
-        if state_shape != (expected_state_dim,):
+        if state_shape != (self.action_dim,):
             raise ValueError(
-                f"RoboTwin single-arm state dimension mismatch for task "
-                f"{self.task_name}: expected shape ({expected_state_dim},), got "
-                f"{state_shape}. This usually means RLinf loaded a RoboTwin "
-                "package that does not support task_config.single_arm; check "
-                "ROBOTWIN_PATH/PYTHONPATH and robotwin.envs.vector_env.__file__."
+                f"RoboTwin observation state dimension mismatch for task "
+                f"{self.task_name}: expected shape ({self.action_dim},), got "
+                f"{state_shape}."
             )
+
+    def _adapt_actions_for_venv(self, actions: np.ndarray) -> np.ndarray:
+        if not self.is_franka_single_arm:
+            return actions
+
+        actions = np.asarray(actions)
+        if bool(self.venv.args.get("single_arm", False)):
+            return actions
+        if self.env_action_dim == self.action_dim:
+            return actions
+
+        raw_states = self._last_raw_states
+        if raw_states is None or raw_states.shape[0] != actions.shape[0]:
+            raise ValueError(
+                "Cannot adapt single-arm Franka actions to legacy RoboTwin layout "
+                "before a full raw observation batch has been cached."
+            )
+        if raw_states.shape[-1] != 16:
+            raise ValueError(
+                "Cannot adapt single-arm Franka actions to legacy RoboTwin layout: "
+                f"expected cached raw state shape (N, 16), got {raw_states.shape}."
+            )
+
+        env_actions = np.zeros(
+            (*actions.shape[:-1], 16), dtype=np.asarray(actions).dtype
+        )
+        inactive_state = raw_states[:, None, :]
+        if self.active_arm == "left":
+            env_actions[..., :8] = actions
+            env_actions[..., 8:16] = inactive_state[..., 8:16]
+        elif self.active_arm == "right":
+            env_actions[..., :8] = inactive_state[..., :8]
+            env_actions[..., 8:16] = actions
+        else:
+            raise ValueError(f"active_arm must be 'left' or 'right', got {self.active_arm}")
+        return env_actions
 
     @property
     def device(self):
@@ -232,6 +261,7 @@ class RoboTwinEnv(gym.Env):
         batch_images = []
         batch_wrist_images = []
         batch_states = []
+        batch_raw_states = []
         batch_instructions = []
         task_config = self.cfg.task_config
         single_arm = bool(task_config.get("single_arm", False))
@@ -269,8 +299,11 @@ class RoboTwinEnv(gym.Env):
                 batch_wrist_images.append(
                     torch.stack([torch.from_numpy(img) for img in wrist_images])
                 )
-            self._validate_observation_state_dim(obs["state"])
-            batch_states.append(obs["state"])
+            raw_state = np.asarray(obs["state"], dtype=np.float32)
+            state = self._project_franka_single_arm_state(raw_state)
+            self._validate_observation_state_dim(state)
+            batch_raw_states.append(raw_state)
+            batch_states.append(state)
             batch_instructions.append(obs["instruction"])
 
         batch_images = torch.stack([torch.from_numpy(img) for img in batch_images])
@@ -278,6 +311,8 @@ class RoboTwinEnv(gym.Env):
             batch_wrist_images = torch.stack(batch_wrist_images)
         else:
             batch_wrist_images = None
+        if len(batch_raw_states) == self.num_envs:
+            self._last_raw_states = np.stack(batch_raw_states)
         batch_states = torch.stack([torch.from_numpy(state) for state in batch_states])
 
         extracted_obs = {
@@ -358,9 +393,10 @@ class RoboTwinEnv(gym.Env):
             # [n_envs, action_dim] -> [n_envs, 1, action_dim]
             actions = actions[:, None, :]
         self._validate_action_dim(actions)
+        env_actions = self._adapt_actions_for_venv(actions)
 
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
-            actions
+            env_actions
         )
         extracted_obs = self._extract_obs_image(raw_obs)
         infos = list_of_dict_to_dict_of_list(info_list)
@@ -410,13 +446,14 @@ class RoboTwinEnv(gym.Env):
 
         # chunk_actions: [num_envs, chunk_step, action_dim]
         self._validate_action_dim(chunk_actions)
+        env_chunk_actions = self._adapt_actions_for_venv(chunk_actions)
         num_envs = chunk_actions.shape[0]
         chunk_step = chunk_actions.shape[1]
         obs_list = []
         infos_list = []
 
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
-            chunk_actions
+            env_chunk_actions
         )
         extracted_obs = self._extract_obs_image(raw_obs)
         infos = list_of_dict_to_dict_of_list(info_list)
