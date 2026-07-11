@@ -56,7 +56,7 @@ env:
     task_config:
       embodiment: [franka-panda]
       single_arm: true
-      active_arm: right
+      active_arm: left
       dual_arm: false
       planner_backend: mplib
       step_lim: 800

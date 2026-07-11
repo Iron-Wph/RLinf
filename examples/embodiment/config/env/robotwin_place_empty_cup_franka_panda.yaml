@@ -40,7 +40,7 @@ task_config:
   # Its policy-facing qpos action/state layout is 7 joints + 1 gripper.
   embodiment: [franka-panda]
   single_arm: true
-  active_arm: right
+  active_arm: left
   dual_arm: false
 
   language_num: 100

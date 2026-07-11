@@ -38,7 +38,7 @@ task_config:
 
   embodiment: [franka-panda]
   single_arm: true
-  active_arm: right
+  active_arm: left
   dual_arm: false
 
   language_num: 100

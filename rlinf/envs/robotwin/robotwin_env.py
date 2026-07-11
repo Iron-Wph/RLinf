@@ -84,9 +84,12 @@ class RoboTwinEnv(gym.Env):
         from robotwin.envs.vector_env import VectorEnv
 
         env_seeds = self.reset_state_ids.tolist()
+        task_config = OmegaConf.to_container(self.cfg.task_config, resolve=True)
+        if bool(task_config.get("single_arm", False)):
+            task_config.setdefault("active_arm", "left")
 
         self.venv = VectorEnv(
-            task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
+            task_config=task_config,
             n_envs=self.num_envs,
             env_seeds=env_seeds,
         )
@@ -195,7 +198,7 @@ class RoboTwinEnv(gym.Env):
         batch_instructions = []
         task_config = self.cfg.task_config
         single_arm = bool(task_config.get("single_arm", False))
-        active_arm = task_config.get("active_arm", "right")
+        active_arm = task_config.get("active_arm", "left")
         if single_arm and active_arm not in ("left", "right"):
             raise ValueError(f"active_arm must be 'left' or 'right', got {active_arm}")
 
