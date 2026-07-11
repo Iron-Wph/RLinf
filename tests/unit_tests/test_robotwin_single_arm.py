@@ -18,12 +18,14 @@ def _make_env_wrapper(*, single_arm: bool, active_arm: str = "right") -> RoboTwi
     return env
 
 
-def _raw_observation():
+def _raw_observation(state=None):
+    if state is None:
+        state = np.arange(8, dtype=np.float32)
     return {
         "full_image": np.zeros((4, 6, 3), dtype=np.uint8),
         "left_wrist_image": np.full((4, 6, 3), 11, dtype=np.uint8),
         "right_wrist_image": np.full((4, 6, 3), 22, dtype=np.uint8),
-        "state": np.arange(8, dtype=np.float32),
+        "state": state,
         "instruction": "stack the blocks",
     }
 
@@ -42,6 +44,14 @@ def test_single_arm_observation_keeps_only_active_wrist_camera(
     assert observation["states"].shape == (1, 8)
     assert observation["wrist_images"].shape == (1, 1, 4, 6, 3)
     assert np.all(observation["wrist_images"][0, 0].numpy() == expected_pixel)
+
+
+def test_single_arm_observation_rejects_legacy_dual_arm_state_vector():
+    env = _make_env_wrapper(single_arm=True)
+    observation = _raw_observation(state=np.arange(16, dtype=np.float32))
+
+    with pytest.raises(ValueError, match="does not support task_config.single_arm"):
+        env._extract_obs_image([observation])
 
 
 def test_dual_arm_observation_keeps_both_wrist_cameras():

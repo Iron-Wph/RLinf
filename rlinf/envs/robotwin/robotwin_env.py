@@ -104,6 +104,21 @@ class RoboTwinEnv(gym.Env):
                 "task_config.embodiment/single_arm."
             )
 
+    def _validate_observation_state_dim(self, state: np.ndarray) -> None:
+        """Ensure single-arm RoboTwin already returns the active-arm state."""
+        if not bool(self.cfg.task_config.get("single_arm", False)):
+            return
+
+        state_shape = np.asarray(state).shape
+        if state_shape != (self.action_dim,):
+            raise ValueError(
+                f"RoboTwin single-arm state dimension mismatch for task "
+                f"{self.task_name}: expected shape ({self.action_dim},), got "
+                f"{state_shape}. This usually means RLinf loaded a RoboTwin "
+                "package that does not support task_config.single_arm; check "
+                "ROBOTWIN_PATH/PYTHONPATH and robotwin.envs.vector_env.__file__."
+            )
+
     @property
     def device(self):
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -214,6 +229,7 @@ class RoboTwinEnv(gym.Env):
                 batch_wrist_images.append(
                     torch.stack([torch.from_numpy(img) for img in wrist_images])
                 )
+            self._validate_observation_state_dim(obs["state"])
             batch_states.append(obs["state"])
             batch_instructions.append(obs["instruction"])
 
