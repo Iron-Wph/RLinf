@@ -21,6 +21,51 @@ from rlinf.algorithms.utils import huber_loss
 from rlinf.utils.utils import masked_mean, masked_mean_ratio
 
 
+def _compute_value_diagnostics(
+    values: torch.Tensor, returns: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    """Compute stable critic diagnostics over flattened valid samples."""
+    value_pred = values.detach().float().reshape(-1)
+    value_target = returns.detach().float().reshape(-1)
+
+    if value_target.numel() == 0:
+        zero = torch.zeros((), device=returns.device, dtype=torch.float32)
+        return {
+            "critic/value_target_mean": zero,
+            "critic/value_target_std": zero,
+            "critic/value_pred_mean": zero,
+            "critic/value_pred_std": zero,
+            "critic/value_mse": zero,
+            "critic/value_mae": zero,
+            "critic/value_target_pred_corr": zero,
+        }
+
+    target_mean = value_target.mean()
+    target_std = value_target.std(unbiased=False)
+    pred_mean = value_pred.mean()
+    pred_std = value_pred.std(unbiased=False)
+    error = value_pred - value_target
+
+    covariance = ((value_target - target_mean) * (value_pred - pred_mean)).mean()
+    std_product = target_std * pred_std
+    eps = torch.finfo(value_target.dtype).eps
+    correlation = torch.where(
+        std_product > eps,
+        covariance / std_product.clamp_min(eps),
+        torch.zeros_like(covariance),
+    )
+
+    return {
+        "critic/value_target_mean": target_mean,
+        "critic/value_target_std": target_std,
+        "critic/value_pred_mean": pred_mean,
+        "critic/value_pred_std": pred_std,
+        "critic/value_mse": error.square().mean(),
+        "critic/value_mae": error.abs().mean(),
+        "critic/value_target_pred_corr": correlation,
+    }
+
+
 def compute_decoupled_ppo_actor_loss(
     logprobs: torch.Tensor,
     old_logprobs: torch.Tensor,
@@ -378,11 +423,14 @@ def compute_ppo_critic_loss(
         else:
             explained_variance = 1 - var_diff / var_returns
 
+    value_diagnostics = _compute_value_diagnostics(masked_values, masked_returns)
+
     # Compile metrics for logging
     metrics_data = {
         "critic/value_loss": value_loss.detach(),
         "critic/value_clip_ratio": value_clip_ratio.detach(),
         "critic/explained_variance": explained_variance.detach(),
+        **value_diagnostics,
     }
     return value_loss, metrics_data
 
