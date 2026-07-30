@@ -83,11 +83,20 @@ class RoboTwinEnv(gym.Env):
         from robotwin.envs.vector_env import VectorEnv
 
         env_seeds = self.reset_state_ids.tolist()
+        instruction_type = self.cfg.get(
+            "instruction_type", "unseen" if self.cfg.is_eval else "seen"
+        )
+        if self.cfg.is_eval:
+            assert instruction_type == "unseen", (
+                "RoboTwin evaluation requires instruction_type=unseen. "
+                "Set env.eval.instruction_type: unseen in the experiment YAML."
+            )
 
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
             env_seeds=env_seeds,
+            instruction_type=instruction_type,
         )
         self.action_dim = int(self.venv.args["action_dim"])
 
