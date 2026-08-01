@@ -314,8 +314,9 @@ class Cluster:
 
         try:
             # First try to connect to an existing Ray cluster
+            ray_address = os.environ.get("RAY_ADDRESS", "auto")
             ray_init_kwargs: dict[str, Any] = {
-                "address": "auto",
+                "address": ray_address,
                 "logging_level": Cluster.LOGGING_LEVEL,
                 "namespace": Cluster.NAMESPACE,
             }
@@ -449,7 +450,7 @@ class Cluster:
     def _init_from_existing_managers(self):
         if not ray.is_initialized():
             ray.init(
-                address="auto",
+                address=os.environ.get("RAY_ADDRESS", "auto"),
                 namespace=Cluster.NAMESPACE,
                 logging_level=Cluster.LOGGING_LEVEL,
             )

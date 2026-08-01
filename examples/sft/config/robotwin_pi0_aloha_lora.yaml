@@ -1,0 +1,83 @@
+defaults:
+  - model/pi0_robotwin_lora@actor.model
+  - hybrid_engines/fsdp@actor.fsdp_config
+  - _self_
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+# One A800 process only. SFT has no environment or rollout worker.
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor: 0-1  # physical GPU 1; isolated Ray head advertises both GPUs.
+
+runner:
+  task_type: sft
+  logger:
+    log_path: "../results"
+    project_name: "rlinf"
+    experiment_name: "robotwin_pi0_aloha_lora"
+    logger_backends: ["tensorboard"]
+
+  max_epochs: -1
+  max_steps: 30000
+  val_check_interval: -1
+  save_interval: 1000
+
+data:
+  # Local RoboTwin LeRobot v2.1 dataset for the adjust_bottle task.
+  train_data_paths: "/mnt/public2/wph/codes/develop_async/RoboTwin_main_official/data/robotwin/adjust_bottle"
+  num_workers: 2
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  # Gradient accumulation reproduces RoboTwin's global batch size 32 on one A800.
+  micro_batch_size: 16
+  global_batch_size: 32
+  seed: 42
+
+  model:
+    # Use the task-specific normalisation statistics, not the generic RoboTwin
+    # statistics bundled beside the base checkpoint.
+    openpi_data:
+      norm_stats_path: "/mnt/public2/wph/models/pi0_base/pi0_base/physical-intelligence/robotwin/adjust_bottle/norm_stats.json"
+
+  optim:
+    lr: 2.5e-5
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-8
+    weight_decay: 1.0e-10
+    clip_grad: 1.0
+    total_training_steps: 30000
+    lr_warmup_steps: 1000
+    lr_scheduler: "openpi_cosine"
+    num_cycles: 0.5
+    min_lr: 2.5e-6
+
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "full_shard"
+    # With one rank, PyTorch changes FULL_SHARD to NO_SHARD. In that mode,
+    # use_orig_params=True conflicts with PEFT LoRA's flattened-parameter
+    # writeback ("Cannot writeback when the parameter shape changes"). Keep
+    # it false; a real forward/backward/update smoke test covers this recipe.
+    use_orig_params: false
+    gradient_checkpointing: false
+    mixed_precision:
+      # Pi0 converts its selected parameters to bf16 itself. Let AMP cast the
+      # image preprocessing ops too; F.grid_sample requires image/grid dtypes
+      # to match, so FSDP parameter-only mixed precision is not sufficient.
+      param_dtype: null
+      reduce_dtype: null
+      buffer_dtype: null
+    amp_autocast:
+      enabled: true
+      precision: "bf16"

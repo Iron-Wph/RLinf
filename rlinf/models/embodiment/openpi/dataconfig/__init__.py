@@ -15,6 +15,7 @@
 
 import dataclasses
 import difflib
+import functools
 import pathlib
 from typing import Optional
 
@@ -73,6 +74,75 @@ from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
+
+
+class _Datasets4ColumnCompat:
+    """Keep LeRobot 0.1.0's column accesses compatible with datasets 4.x.
+
+    LeRobot 0.1.0 passes ``Dataset["timestamp"]`` directly to
+    ``torch.stack``. In datasets 4.x that expression returns a ``Column``
+    object instead of the list returned by datasets 3.x, and PyTorch refuses
+    the Column even though its elements are tensors. This proxy retains the
+    Dataset API used by LeRobot while converting string-key column lookups
+    back to ordinary lists. ``select`` returns another proxy because LeRobot
+    stacks selected action-history columns as well.
+    """
+
+    def __init__(self, dataset):
+        self._dataset = dataset
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_dataset"), name)
+
+    def __getstate__(self):
+        return {"_dataset": self._dataset}
+
+    def __setstate__(self, state):
+        self._dataset = state["_dataset"]
+
+    def __getitem__(self, key):
+        value = self._dataset[key]
+        if isinstance(key, str):
+            return list(value)
+        return value
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def select(self, *args, **kwargs):
+        return type(self)(self._dataset.select(*args, **kwargs))
+
+
+def ensure_lerobot_datasets_compat() -> None:
+    """Patch LeRobot 0.1.0 only when the environment supplies datasets 4.x.
+
+    RLinf pins datasets 3.6.0 for OpenPI. This guard keeps the supported
+    training path usable in pre-existing OpenPI environments that instead
+    contain datasets 4.x, without changing behavior for the pinned version.
+    """
+    try:
+        import datasets
+        from packaging.version import Version
+    except ImportError:
+        return
+
+    if Version(datasets.__version__) < Version("4.0.0"):
+        return
+
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+
+    if getattr(LeRobotDataset, "_rlinf_datasets4_compat", False):
+        return
+
+    original_load_hf_dataset = LeRobotDataset.load_hf_dataset
+
+    @functools.wraps(original_load_hf_dataset)
+    def load_hf_dataset_with_column_compat(self):
+        return _Datasets4ColumnCompat(original_load_hf_dataset(self))
+
+    LeRobotDataset.load_hf_dataset = load_hf_dataset_with_column_compat
+    LeRobotDataset._rlinf_datasets4_compat = True
+
 
 _CONFIGS = [
     TrainConfig(

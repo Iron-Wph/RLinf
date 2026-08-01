@@ -1,0 +1,35 @@
+model_type: "openpi"
+
+# RoboTwin's official pi0 LoRA recipe uses the classic pi0 architecture:
+# 50-step action chunks, 14 ALOHA joint/gripper actions, and three camera views.
+model_path: "/mnt/public2/wph/models/pi0_base/pi0_base"
+precision: null
+
+is_lora: true
+# Kept for the shared RLinf schema. The RoboTwin dual-expert path uses the two
+# explicit ranks below, matching RoboTwin's JAX configuration exactly.
+lora_rank: 16
+
+num_action_chunks: 50
+action_dim: 14
+use_proprio: true
+num_steps: 10
+add_value_head: false
+
+openpi:
+  config_name: "pi0_aloha_robotwin"
+  num_images_in_input: 3
+  action_chunk: ${..num_action_chunks}
+  action_env_dim: ${..action_dim}
+  # Applies rank-16 LoRA to PaliGemma and rank-32 LoRA to the action expert.
+  # This freezes both LLM base weights while keeping SigLIP and pi0 projections
+  # trainable, like RoboTwin's pi0_base_aloha_robotwin_lora recipe.
+  lora_style: "robotwin_pi0_dual_expert"
+  paligemma_lora_rank: 16
+  action_expert_lora_rank: 32
+  # OpenPI JAX initializes both LoRA A/B matrices with normal(std=0.01).
+  lora_init_std: 0.01
+  # Abort model construction if actual targets, ranks, freeze boundary, or init differ.
+  verify_lora_layout: true
+  detach_critic_input: true
+  train_expert_only: false

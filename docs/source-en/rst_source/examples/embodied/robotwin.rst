@@ -217,6 +217,40 @@ For Lingbot-VLA recipes, point ``actor.model.model_path`` and
    ``unnorm_key: "place_empty_cup"``) must match the ``unnorm_key`` used when the SFT
    checkpoint was trained, otherwise actions will be denormalized incorrectly.
 
+Train RoboTwin π₀ ALOHA LoRA on one A800
+----------------------------------------
+
+RLinf provides a single-GPU SFT recipe equivalent to RoboTwin's
+``pi0_base_aloha_robotwin_lora`` training configuration. It uses the Torch
+checkpoint, so the JAX checkpoint is not needed at runtime. The recipe keeps
+the official 14-D ALOHA actions, 50-step horizon, global batch size 32,
+30,000 optimization steps, and AdamW warmup-cosine schedule. It applies
+rank-16 LoRA to PaliGemma and rank-32 LoRA to the action expert; the two LLM
+bases are frozen while SigLIP and the π₀ projection layers remain trainable.
+
+Set ``data.train_data_paths`` in
+``examples/sft/config/robotwin_pi0_aloha_lora.yaml`` to the local RoboTwin
+LeRobot dataset root. The supplied Torch base checkpoint must contain
+``physical-intelligence/robotwin/adjust_bottle/norm_stats.json`` (the provided
+``/mnt/public2/wph/models/pi0_base/pi0_base`` does).
+
+.. code:: bash
+
+   cd /mnt/public2/wph/codes/develop_async/RLinf_lora
+   source /root/.bashrc
+   source switch_env openpi
+   export JAX_PLATFORMS=cpu
+   bash examples/sft/run_robotwin_pi0_aloha_lora.sh
+
+For a different data root without editing YAML, use a Hydra override:
+
+.. code:: bash
+
+   python examples/sft/train_vla_sft.py \
+      --config-path examples/sft/config \
+      --config-name robotwin_pi0_aloha_lora \
+      data.train_data_paths=/absolute/path/to/robotwin_lerobot
+
 Run It
 ------
 

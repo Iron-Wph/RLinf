@@ -213,6 +213,37 @@ RoboTwin 支持 46 个操作任务。RLinf 提供了以下 ready-to-run 环境�
    配置中的动作归一化键 ``unnorm_key`` 必须与训练该 SFT 检查点时所用的 ``unnorm_key``
    一致，例如 ``unnorm_key: "place_empty_cup"``，否则动作会被错误地反归一化。
 
+在单张 A800 上训练 RoboTwin π₀ ALOHA LoRA
+----------------------------------------
+
+RLinf 提供了与 RoboTwin ``pi0_base_aloha_robotwin_lora`` 对齐的单卡 SFT 配方。
+该配方运行时使用 Torch 检查点，因此不需要 JAX 检查点；它保留官方的 14 维 ALOHA
+动作、50 步 horizon、全局 batch size 32、30,000 个优化步数以及 AdamW warmup-cosine
+调度。PaliGemma 使用 rank 16 LoRA，action expert 使用 rank 32 LoRA；两个 LLM 基座
+被冻结，而 SigLIP 和 π₀ 投影层保持可训练。
+
+将 ``examples/sft/config/robotwin_pi0_aloha_lora.yaml`` 中的
+``data.train_data_paths`` 设置为本地 RoboTwin LeRobot 数据集根目录。Torch 基座检查点
+需要包含 ``physical-intelligence/robotwin/adjust_bottle/norm_stats.json``；你提供的
+``/mnt/public2/wph/models/pi0_base/pi0_base`` 已包含该文件。
+
+.. code:: bash
+
+   cd /mnt/public2/wph/codes/develop_async/RLinf_lora
+   source /root/.bashrc
+   source switch_env openpi
+   export JAX_PLATFORMS=cpu
+   bash examples/sft/run_robotwin_pi0_aloha_lora.sh
+
+如需在不编辑 YAML 的情况下指定其他数据目录，可使用 Hydra 覆盖：
+
+.. code:: bash
+
+   python examples/sft/train_vla_sft.py \
+      --config-path examples/sft/config \
+      --config-name robotwin_pi0_aloha_lora \
+      data.train_data_paths=/absolute/path/to/robotwin_lerobot
+
 运行
 ----------------------------------------
 

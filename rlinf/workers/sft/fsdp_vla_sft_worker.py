@@ -51,8 +51,12 @@ class FSDPVlaSftWorker(FSDPSftWorker):
 
             import openpi.training.data_loader as openpi_data_loader
 
-            from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+            from rlinf.models.embodiment.openpi.dataconfig import (
+                ensure_lerobot_datasets_compat,
+                get_openpi_config,
+            )
 
+            ensure_lerobot_datasets_compat()
             config = get_openpi_config(
                 self.cfg.actor.model.openpi.config_name,
                 model_path=self.cfg.actor.model.model_path,

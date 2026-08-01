@@ -558,34 +558,67 @@ def get_lr_scheduler(
             min_lr=min_lr,
         )
     elif lr_scheduler in ("openpi_cosine", "ref_warmup_cosine"):
-        # Warmup starts at peak/(warmup+1) (not 0), ramps linearly to the peak at
-        # `num_warmup_steps`, then cosine-decays to `min_lr` over the remaining
-        # `num_training_steps - num_warmup_steps` steps. Returned as a multiplier on
-        # the optimizer's base lr (the peak).
+        # Equivalent to OpenPI JAX's optax.warmup_cosine_decay_schedule:
+        #   init_value = peak_lr / (warmup_steps + 1)
+        #   peak_value = peak_lr
+        #   decay_steps = total_training_steps
+        #   end_value = min_lr
+        #
+        # In particular, ``decay_steps`` includes warmup. The cosine therefore
+        # runs for ``total_training_steps - warmup_steps`` steps. Do not replace
+        # this with HuggingFace's ``cosine`` scheduler: that scheduler starts from
+        # zero and has different end-point semantics.
         from torch.optim.lr_scheduler import LambdaLR
 
-        base_lr = optimizer.param_groups[0]["lr"]
-        if min_lr_rate is not None:
-            min_mult = min_lr_rate
-        elif min_lr and base_lr > 0:
-            min_mult = min_lr / base_lr
-        else:
-            min_mult = 0.0
-
-        def lr_lambda(current_step):
-            if current_step < num_warmup_steps:
-                init_mult = 1.0 / (num_warmup_steps + 1)
-                return init_mult + (1.0 - init_mult) * current_step / max(
-                    1, num_warmup_steps
-                )
-            progress = (current_step - num_warmup_steps) / max(
-                1, num_training_steps - num_warmup_steps
+        if num_warmup_steps < 0:
+            raise ValueError(
+                "openpi_cosine requires non-negative lr_warmup_steps, got "
+                f"{num_warmup_steps}."
             )
-            progress = min(1.0, progress)
-            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-            return min_mult + (1.0 - min_mult) * cosine
+        if num_training_steps <= num_warmup_steps:
+            raise ValueError(
+                "openpi_cosine requires total_training_steps to be greater than "
+                "lr_warmup_steps, matching Optax's positive cosine-decay length; "
+                f"got total_training_steps={num_training_steps}, "
+                f"lr_warmup_steps={num_warmup_steps}."
+            )
 
-        return LambdaLR(optimizer, lr_lambda, last_epoch=last_epoch)
+        # LambdaLR accepts one lambda per parameter group. This keeps the
+        # schedule correct for resumed optimizers (use initial_lr, i.e. the JAX
+        # peak) and avoids deriving every group's end value from group 0.
+        base_lrs = [
+            float(group.get("initial_lr", group["lr"]))
+            for group in optimizer.param_groups
+        ]
+        if min_lr_rate is not None:
+            min_multipliers = [float(min_lr_rate)] * len(base_lrs)
+        else:
+            min_multipliers = [
+                float(min_lr) / base_lr if base_lr > 0 else 0.0 for base_lr in base_lrs
+            ]
+
+        def make_openpi_lambda(min_multiplier: float):
+            def lr_lambda(current_step: int) -> float:
+                if current_step < num_warmup_steps:
+                    init_multiplier = 1.0 / (num_warmup_steps + 1)
+                    return init_multiplier + (1.0 - init_multiplier) * (
+                        current_step / max(1, num_warmup_steps)
+                    )
+
+                progress = (current_step - num_warmup_steps) / (
+                    num_training_steps - num_warmup_steps
+                )
+                progress = min(1.0, progress)
+                cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+                return min_multiplier + (1.0 - min_multiplier) * cosine
+
+            return lr_lambda
+
+        return LambdaLR(
+            optimizer,
+            [make_openpi_lambda(multiplier) for multiplier in min_multipliers],
+            last_epoch=last_epoch,
+        )
     # PyTorch native
     elif lr_scheduler == "torch_constant":
         from torch.optim.lr_scheduler import ConstantLR
