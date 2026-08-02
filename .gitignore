@@ -22,3 +22,10 @@ rlinf/envs/maniskill/assets
 PKG-INFO
 *.egg-info/
 .claude/settings.json
+
+# Local RoboTwin references, debug data, and exported model weights.
+# These artifacts are intentionally reproducible from the documented commands
+# and must not be committed to the source repository.
+.robotwin-reference/
+data/adjust_bottle_reward/
+exports/

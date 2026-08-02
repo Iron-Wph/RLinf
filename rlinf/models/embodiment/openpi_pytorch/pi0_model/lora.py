@@ -87,8 +87,9 @@ class Einsum(nn.Module):
             shape_b[axes[0]] = rank
 
             w_a = torch.empty(*shape_a)
-            w_b = torch.zeros(*shape_b)  # LoRA B initialized to zero
+            w_b = torch.empty(*shape_b)
             nn.init.normal_(w_a, std=0.01)
+            nn.init.normal_(w_b, std=0.01)
             self.w_a = nn.Parameter(w_a)
             self.w_b = nn.Parameter(w_b)
             self._eqn_a, self._eqn_b = self._make_lora_eqns(
@@ -136,6 +137,78 @@ class Einsum(nn.Module):
         return result
 
 
+class HeadwiseLoRALinear(nn.Linear):
+    """Linear base projection with the JAX Pi0 head-wise LoRA layout.
+
+    The base ``weight`` stays an ``nn.Linear`` leaf, which keeps a converted
+    PyTorch Pi0 checkpoint key-compatible with the non-LoRA model. The delta
+    is deliberately not flattened over attention heads:
+
+    * Q/K/V: ``A[head, input, rank] @ B[head, rank, head_dim]``
+    * O: ``A[head, head_dim, rank] @ B[head, rank, output]``
+
+    This matches OpenPI JAX ``lora.Einsum``. Both A and B use JAX's
+    ``normal(stddev=0.01)`` initializer; a zero B would change checkpoint-0
+    behavior and the training trajectory.
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        *,
+        target: str,
+        num_heads: int,
+        head_dim: int,
+        lora_config: LoRAConfig,
+        bias: bool = False,
+    ):
+        super().__init__(in_features, out_features, bias=bias)
+        if target not in {"q", "k", "v", "o"}:
+            raise ValueError(f"Unsupported attention LoRA target: {target}")
+        if num_heads <= 0 or head_dim <= 0:
+            raise ValueError("num_heads and head_dim must be positive.")
+
+        self.target = target
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.lora_config = lora_config
+
+        if target == "o":
+            expected_input = num_heads * head_dim
+            if in_features != expected_input:
+                raise ValueError(
+                    f"O projection expects {expected_input} input features, got {in_features}."
+                )
+            shape_a = (num_heads, head_dim, lora_config.rank)
+            shape_b = (num_heads, lora_config.rank, out_features)
+        else:
+            expected_output = num_heads * head_dim
+            if out_features != expected_output:
+                raise ValueError(
+                    f"{target.upper()} projection expects {expected_output} output features, got {out_features}."
+                )
+            shape_a = (num_heads, in_features, lora_config.rank)
+            shape_b = (num_heads, lora_config.rank, head_dim)
+
+        self.lora_a = nn.Parameter(torch.empty(shape_a))
+        self.lora_b = nn.Parameter(torch.empty(shape_b))
+        nn.init.normal_(self.lora_a, mean=0.0, std=0.01)
+        nn.init.normal_(self.lora_b, mean=0.0, std=0.01)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        base = super().forward(x)
+        a = self.lora_a.to(dtype=x.dtype)
+        b = self.lora_b.to(dtype=x.dtype)
+        if self.target == "o":
+            x_heads = x.reshape(*x.shape[:-1], self.num_heads, self.head_dim)
+            delta = torch.einsum("...he,her,hrd->...d", x_heads, a, b)
+        else:
+            delta = torch.einsum("...d,hdr,hre->...he", x, a, b)
+            delta = delta.reshape(*x.shape[:-1], self.out_features)
+        return base + delta * self.lora_config.scaling_value
+
+
 class FeedForward(nn.Module):
     """FeedForward module with optional LoRA support.
 
@@ -168,11 +241,13 @@ class FeedForward(nn.Module):
             rank = lora_config.rank
             # LoRA for w_gating[0] and w_gating[1] separately
             self.w_gating_lora_a = nn.Parameter(torch.empty(2, features, rank))
-            self.w_gating_lora_b = nn.Parameter(torch.zeros(2, rank, hidden_dim))
+            self.w_gating_lora_b = nn.Parameter(torch.empty(2, rank, hidden_dim))
             self.w_linear_lora_a = nn.Parameter(torch.empty(hidden_dim, rank))
-            self.w_linear_lora_b = nn.Parameter(torch.zeros(rank, features))
+            self.w_linear_lora_b = nn.Parameter(torch.empty(rank, features))
             nn.init.normal_(self.w_gating_lora_a, std=0.01)
+            nn.init.normal_(self.w_gating_lora_b, std=0.01)
             nn.init.normal_(self.w_linear_lora_a, std=0.01)
+            nn.init.normal_(self.w_linear_lora_b, std=0.01)
         else:
             self.w_gating_lora_a = None
             self.w_gating_lora_b = None

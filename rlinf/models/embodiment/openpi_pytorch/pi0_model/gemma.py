@@ -216,10 +216,11 @@ class Attention(nn.Module):
 
         for config in configs:
             lora_cfg = config.lora_configs.get("attn")
-            # TODO: add lora attn support
-            if lora_cfg is not None:
-                raise NotImplementedError
             if config.num_kv_heads == config.num_heads:
+                if lora_cfg is not None:
+                    raise NotImplementedError(
+                        "JAX Pi0 LoRA only uses GQA attention projections."
+                    )
                 # Combined QKV projection
                 self.q_proj.append(
                     nn.Linear(
@@ -229,25 +230,79 @@ class Attention(nn.Module):
                 self.k_proj.append(None)  # handled by q_proj
                 self.v_proj.append(None)
             else:
-                self.q_proj.append(
-                    nn.Linear(
-                        config.width, config.num_heads * config.head_dim, bias=False
+                if lora_cfg is None:
+                    self.q_proj.append(
+                        nn.Linear(
+                            config.width,
+                            config.num_heads * config.head_dim,
+                            bias=False,
+                        )
                     )
-                )
-                self.k_proj.append(
-                    nn.Linear(
-                        config.width, config.num_kv_heads * config.head_dim, bias=False
+                    self.k_proj.append(
+                        nn.Linear(
+                            config.width,
+                            config.num_kv_heads * config.head_dim,
+                            bias=False,
+                        )
                     )
-                )
-                self.v_proj.append(
-                    nn.Linear(
-                        config.width, config.num_kv_heads * config.head_dim, bias=False
+                    self.v_proj.append(
+                        nn.Linear(
+                            config.width,
+                            config.num_kv_heads * config.head_dim,
+                            bias=False,
+                        )
                     )
-                )
+                else:
+                    self.q_proj.append(
+                        lora.HeadwiseLoRALinear(
+                            config.width,
+                            config.num_heads * config.head_dim,
+                            target="q",
+                            num_heads=config.num_heads,
+                            head_dim=config.head_dim,
+                            lora_config=lora_cfg,
+                            bias=False,
+                        )
+                    )
+                    self.k_proj.append(
+                        lora.HeadwiseLoRALinear(
+                            config.width,
+                            config.num_kv_heads * config.head_dim,
+                            target="k",
+                            num_heads=config.num_kv_heads,
+                            head_dim=config.head_dim,
+                            lora_config=lora_cfg,
+                            bias=False,
+                        )
+                    )
+                    self.v_proj.append(
+                        lora.HeadwiseLoRALinear(
+                            config.width,
+                            config.num_kv_heads * config.head_dim,
+                            target="v",
+                            num_heads=config.num_kv_heads,
+                            head_dim=config.head_dim,
+                            lora_config=lora_cfg,
+                            bias=False,
+                        )
+                    )
 
-            self.o_proj.append(
-                nn.Linear(config.num_heads * config.head_dim, config.width, bias=False)
-            )
+            if lora_cfg is None:
+                self.o_proj.append(
+                    nn.Linear(config.num_heads * config.head_dim, config.width, bias=False)
+                )
+            else:
+                self.o_proj.append(
+                    lora.HeadwiseLoRALinear(
+                        config.num_heads * config.head_dim,
+                        config.width,
+                        target="o",
+                        num_heads=config.num_heads,
+                        head_dim=config.head_dim,
+                        lora_config=lora_cfg,
+                        bias=False,
+                    )
+                )
 
         # Initialize weights
         self._init_weights()

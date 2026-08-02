@@ -13,11 +13,66 @@
 # limitations under the License.
 # openpi model configs
 
+import logging
 import os
 import pathlib
 
 import torch
 from omegaconf import DictConfig
+
+
+def _get_rlinf_full_weights_path(checkpoint_dir: str | os.PathLike[str]) -> str | None:
+    """Return a runner full-state checkpoint under a local model directory."""
+    checkpoint_dir = os.fspath(checkpoint_dir)
+    for candidate in (
+        os.path.join(checkpoint_dir, "model_state_dict", "full_weights.pt"),
+        os.path.join(checkpoint_dir, "actor", "model_state_dict", "full_weights.pt"),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def load_rlinf_full_weights(model, model_path: str | os.PathLike[str], *, is_lora: bool) -> bool:
+    """Load a full RLinf OpenPI checkpoint after its final architecture exists.
+
+    A RoboTwin LoRA state dict contains PEFT MLP modules and JAX-style headwise
+    attention wrappers. It must therefore be loaded only after the outer
+    ``rlinf.models.get_model`` function injects that architecture.
+    """
+    import openpi.shared.download as download
+
+    checkpoint_dir = download.maybe_download(str(model_path))
+    weights_path = _get_rlinf_full_weights_path(checkpoint_dir)
+    if weights_path is None:
+        return False
+
+    state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
+    incompatible = model.load_state_dict(state_dict, strict=False)
+    missing = set(incompatible.missing_keys)
+    unexpected = set(incompatible.unexpected_keys)
+    # JAX pi0 has no action lm_head. The JAX-aligned recipe replaces the unused
+    # Torch-only leaf with Identity, and merged non-LoRA exports omit it too.
+    allowed_missing = set()
+    if not is_lora:
+        allowed_missing = {"paligemma_with_expert.gemma_expert.lm_head.weight"}
+    invalid_missing = sorted(missing - allowed_missing)
+    if invalid_missing or unexpected:
+        raise RuntimeError(
+            "RLinf OpenPI full checkpoint layout mismatch after model construction: "
+            f"missing={invalid_missing[:8]}, unexpected={sorted(unexpected)[:8]}, "
+            f"path={weights_path}"
+        )
+
+    logging.getLogger(__name__).info(
+        "[OPENPI_FULL_CKPT_LOAD] path=%s is_lora=%s tensors=%d missing=%s unexpected=%s",
+        weights_path,
+        is_lora,
+        len(state_dict),
+        sorted(missing),
+        sorted(unexpected),
+    )
+    return True
 
 
 def get_model(cfg: DictConfig, torch_dtype=None):
@@ -51,14 +106,10 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     # load model
     checkpoint_dir = download.maybe_download(str(cfg.model_path))
 
-    # Check if this is a checkpoint directory (saved by FSDP)
-    # Check for model_state_dict/full_weights.pt (direct checkpoint) or actor/model_state_dict/full_weights.pt (from runner)
-    full_weights_path = os.path.join(
-        checkpoint_dir, "model_state_dict", "full_weights.pt"
-    )
-    actor_full_weights_path = os.path.join(
-        checkpoint_dir, "actor", "model_state_dict", "full_weights.pt"
-    )
+    # ``full_weights.pt`` is deliberately not loaded here. The outer RLinf
+    # factory may still need to inject RoboTwin's PEFT and head-wise LoRA
+    # modules. ``load_rlinf_full_weights`` is called there after construction.
+    full_weights_path = _get_rlinf_full_weights_path(checkpoint_dir)
 
     model: OpenPi0ForRLActionPrediction = OpenPi0ForRLActionPrediction(
         actor_model_config
@@ -67,17 +118,8 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     if actor_model_config.train_expert_only:
         model.freeze_vlm()
 
-    # Load weights from checkpoint if it's a checkpoint directory, otherwise load from safetensors
-    if os.path.exists(full_weights_path):
-        # Direct checkpoint directory
-        model_state_dict = torch.load(full_weights_path, map_location="cpu")
-        model.load_state_dict(model_state_dict, strict=False)
-    elif os.path.exists(actor_full_weights_path):
-        # Checkpoint directory from runner
-        model_state_dict = torch.load(actor_full_weights_path, map_location="cpu")
-        model.load_state_dict(model_state_dict, strict=False)
-    else:
-        # Original model directory with safetensors files
+    if full_weights_path is None:
+        # Original model directory with safetensors files.
         weight_paths = sorted(glob.glob(os.path.join(checkpoint_dir, "*.safetensors")))
         if not weight_paths:
             weight_paths = [os.path.join(checkpoint_dir, "model.safetensors")]

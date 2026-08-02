@@ -32,7 +32,10 @@ norm-stats file is copied across verbatim.
 
 from __future__ import annotations
 
+import json
 import pathlib
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 
@@ -88,6 +91,7 @@ def convert(
     input_norm_stats: str | pathlib.Path,
     output_model: str | pathlib.Path,
     output_norm_stats: str | pathlib.Path,
+    config_json: str | pathlib.Path | None = None,
 ) -> pathlib.Path:
     """Convert an SFT checkpoint to the new-format layout.
 
@@ -95,7 +99,9 @@ def convert(
     FSDP key prefixes and casts float weights to bf16 to recover the bare ``Pi0``
     state dict, writes ``output_model/model.safetensors`` + ``output_model/config.json``
     (the new-format structure), and copies ``input_norm_stats`` verbatim to
-    ``output_norm_stats``.
+    ``output_norm_stats``. ``config_json`` optionally supplies the architecture
+    metadata for a non-Behavior model such as RoboTwin Pi0; without it, the
+    historical Behavior Pi0.5 metadata is retained for compatibility.
     """
     weights_path = _resolve_full_weights(pathlib.Path(ckpt))
     loaded = torch.load(
@@ -106,7 +112,16 @@ def convert(
 
     output_model = pathlib.Path(output_model)
     save_safetensors(bare_state, output_model / "model.safetensors")
-    write_config_json(_PI05_BEHAVIOR_CONFIG, output_model)
+    config: Mapping[str, Any] = _PI05_BEHAVIOR_CONFIG
+    if config_json is not None:
+        with pathlib.Path(config_json).open(encoding="utf-8") as handle:
+            parsed = json.load(handle)
+        if not isinstance(parsed, dict):
+            raise TypeError(
+                f"Expected a JSON object in {config_json}, got {type(parsed).__name__}."
+            )
+        config = parsed
+    write_config_json(config, output_model)
 
     copy_norm_stats(input_norm_stats, output_norm_stats)
     print(
@@ -133,6 +148,13 @@ def add_arguments(parser) -> None:
         help="output new-format checkpoint dir (config.json + model.safetensors)",
     )
     parser.add_argument(
+        "--config-json",
+        help=(
+            "optional architecture config.json to copy to the export; required "
+            "for a non-Behavior architecture such as RoboTwin Pi0"
+        ),
+    )
+    parser.add_argument(
         "--output-norm-stats", required=True, help="destination norm_stats.json path"
     )
 
@@ -144,4 +166,5 @@ def run(args) -> None:
         args.input_norm_stats,
         args.output_model,
         args.output_norm_stats,
+        config_json=args.config_json,
     )

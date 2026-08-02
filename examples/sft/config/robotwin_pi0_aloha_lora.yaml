@@ -15,7 +15,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-1  # physical GPU 1; isolated Ray head advertises both GPUs.
+    actor: 1  # physical GPU 1 on the isolated two-GPU Ray head.
 
 runner:
   task_type: sft

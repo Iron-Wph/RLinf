@@ -14,10 +14,10 @@
 
 import json
 import logging
-import torch
-import torch.nn as nn
 from typing import Callable, Optional
 
+import torch
+import torch.nn as nn
 from omegaconf import DictConfig
 
 from rlinf.config import EMBODIED_MODEL, SupportedModel, torch_dtype_from_precision
@@ -292,67 +292,85 @@ def get_model(cfg: DictConfig):
         model = model.to(Worker.torch_device_type)
 
     if cfg.is_lora:
-        from peft import LoraConfig, PeftModel, get_peft_model
-
         lora_style = (
             str(cfg.openpi.get("lora_style", ""))
             if hasattr(cfg, "openpi")
             else ""
         )
-        if (
-            SupportedModel(model_type) == SupportedModel.OPENPI
-            and lora_style == "robotwin_pi0_dual_expert"
-        ):
+        is_robotwin_native_lora = (
+            SupportedModel(model_type) == SupportedModel.OPENPI_PYTORCH
+            and lora_style == "robotwin_pi0_native_jax"
+        )
+        if is_robotwin_native_lora:
             if hasattr(cfg, "lora_path") and cfg.lora_path is not None:
                 raise ValueError(
-                    "robotwin_pi0_dual_expert uses two PEFT adapters and cannot "
-                    "load them from the legacy actor.model.lora_path. Resume from "
-                    "an RLinf FSDP checkpoint instead."
+                    "robotwin_pi0_native_jax has native JAX-layout LoRA leaves; "
+                    "resume from an RLinf FSDP checkpoint instead of a PEFT adapter."
                 )
-            _apply_robotwin_pi0_dual_expert_lora(model, cfg, get_peft_model)
-        if not hasattr(cfg, "lora_path") or cfg.lora_path is None:
-            if lora_style != "robotwin_pi0_dual_expert":
-                lora_config = LoraConfig(
-                    r=cfg.lora_rank,
-                    lora_alpha=cfg.lora_rank,
-                    lora_dropout=0.0,
-                    target_modules=[
-                        "proj",
-                        "qkv",
-                        "fc1",
-                        "fc2",  # vision
-                        "q",
-                        "kv",
-                        "fc3",
-                        "out_proj",  # project
-                        "q_proj",
-                        "k_proj",
-                        "v_proj",
-                        "o_proj",
-                        "gate_proj",
-                        "up_proj",
-                        "down_proj",
-                        "lm_head",  # llm
-                    ],
-                    init_lora_weights="gaussian",
-                )
-                if SupportedModel(model_type) in (
-                    SupportedModel.OPENPI,
-                    SupportedModel.CFG_MODEL,
-                ):
-                    module_to_lora = model.paligemma_with_expert.paligemma
-                    module_to_lora = get_peft_model(module_to_lora, lora_config)
-                    tag_vlm_subtree(model, False)
-                    tag_vlm_subtree(module_to_lora, True)
-                    model.paligemma_with_expert.paligemma = module_to_lora
-                else:
-                    model = get_peft_model(model, lora_config)
-        elif lora_style != "robotwin_pi0_dual_expert":
-            model = PeftModel.from_pretrained(model, cfg.lora_path, is_trainable=True)
+        else:
+            from peft import LoraConfig, PeftModel, get_peft_model
+
+            if (
+                SupportedModel(model_type) == SupportedModel.OPENPI
+                and lora_style == "robotwin_pi0_dual_expert"
+            ):
+                if hasattr(cfg, "lora_path") and cfg.lora_path is not None:
+                    raise ValueError(
+                        "robotwin_pi0_dual_expert uses two PEFT adapters and cannot "
+                        "load them from the legacy actor.model.lora_path. Resume from "
+                        "an RLinf FSDP checkpoint instead."
+                    )
+                _apply_robotwin_pi0_dual_expert_lora(model, cfg, get_peft_model)
+            if not hasattr(cfg, "lora_path") or cfg.lora_path is None:
+                if lora_style != "robotwin_pi0_dual_expert":
+                    lora_config = LoraConfig(
+                        r=cfg.lora_rank,
+                        lora_alpha=cfg.lora_rank,
+                        lora_dropout=0.0,
+                        target_modules=[
+                            "proj",
+                            "qkv",
+                            "fc1",
+                            "fc2",  # vision
+                            "q",
+                            "kv",
+                            "fc3",
+                            "out_proj",  # project
+                            "q_proj",
+                            "k_proj",
+                            "v_proj",
+                            "o_proj",
+                            "gate_proj",
+                            "up_proj",
+                            "down_proj",
+                            "lm_head",  # llm
+                        ],
+                        init_lora_weights="gaussian",
+                    )
+                    if SupportedModel(model_type) in (
+                        SupportedModel.OPENPI,
+                        SupportedModel.CFG_MODEL,
+                    ):
+                        module_to_lora = model.paligemma_with_expert.paligemma
+                        module_to_lora = get_peft_model(module_to_lora, lora_config)
+                        tag_vlm_subtree(model, False)
+                        tag_vlm_subtree(module_to_lora, True)
+                        model.paligemma_with_expert.paligemma = module_to_lora
+                    else:
+                        model = get_peft_model(model, lora_config)
+            elif lora_style != "robotwin_pi0_dual_expert":
+                model = PeftModel.from_pretrained(model, cfg.lora_path, is_trainable=True)
 
         if hasattr(model, "value_head"):
             for param in model.value_head.parameters():
                 param.requires_grad = True
+
+    if SupportedModel(model_type) == SupportedModel.OPENPI:
+        # A full FSDP checkpoint must be applied after optional RoboTwin LoRA
+        # modules are injected; see load_rlinf_full_weights for strict auditing.
+        from rlinf.models.embodiment.openpi import load_rlinf_full_weights
+
+        load_rlinf_full_weights(model, cfg.model_path, is_lora=bool(cfg.is_lora))
 
     return model
 
@@ -461,7 +479,7 @@ def _inject_robotwin_headwise_attention_lora(
 ):
     """Replace q/k/v/o with JAX-head-wise LoRA projections in one expert."""
     expected_per_target = 18
-    counts = {target: 0 for target in ("q_proj", "k_proj", "v_proj", "o_proj")}
+    counts = dict.fromkeys(("q_proj", "k_proj", "v_proj", "o_proj"), 0)
 
     for name, child in list(expert.named_modules()):
         if not name.startswith(layer_prefix) or ".self_attn." not in name:

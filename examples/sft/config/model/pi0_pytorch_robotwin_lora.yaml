@@ -1,0 +1,40 @@
+# Native PyTorch Pi0 LoRA recipe matching OpenPI JAX pi0_base_aloha_robotwin_lora.
+# This uses the JAX-aligned Pi0 implementation and its converted base checkpoint,
+# not the legacy HuggingFace/PEFT OpenPI path.
+model_type: "openpi_pytorch"
+model_path: "/mnt/public2/wph/models/pi0_base_pytorch_new"
+precision: fp32
+pi05: false
+
+is_lora: true
+# Retained for the common RLinf model schema. Native Pi0 LoRA uses the two
+# official ranks below instead of generic PEFT target-module matching.
+lora_rank: 16
+
+num_action_chunks: 50
+action_dim: 14
+use_proprio: true
+num_steps: 10
+add_value_head: false
+
+openpi:
+  task: sft
+  config_name: "pi0_aloha_robotwin"
+  num_images_in_input: 3
+  action_chunk: ${..num_action_chunks}
+  action_env_dim: ${..action_dim}
+  model_action_dim: 32
+  paligemma_variant: "gemma_2b_lora"
+  action_expert_variant: "gemma_300m_lora"
+  max_token_len: 48
+  discrete_state_input: false
+
+  # Select native, JAX-layout LoRA. This avoids the generic PEFT injector.
+  lora_style: "robotwin_pi0_native_jax"
+  paligemma_lora_rank: 16
+  action_expert_lora_rank: 32
+  lora_init_std: 0.01
+
+  # The converted checkpoint contains the verified task statistics.
+  assets_dir: ${..model_path}
+  asset_id: "physical-intelligence/robotwin/adjust_bottle"

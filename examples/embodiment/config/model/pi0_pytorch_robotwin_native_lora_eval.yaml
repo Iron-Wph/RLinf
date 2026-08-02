@@ -1,0 +1,35 @@
+# Eval-only model shape for the JAX-aligned PyTorch Pi0 native-LoRA checkpoint.
+model_type: "openpi_pytorch"
+# Pass this explicitly on the eval command line after exporting an SFT
+# checkpoint with ``sft2new``. Keeping it mandatory avoids committing a
+# machine-local run directory as the default model.
+model_path: ???
+precision: bf16
+pi05: false
+
+# This instructs the model factory to construct native JAX-layout LoRA leaves
+# before loading the 1064-tensor trained checkpoint; generic PEFT is bypassed.
+is_lora: true
+lora_rank: 16
+
+num_action_chunks: 50
+action_dim: 14
+use_proprio: true
+num_steps: 10
+add_value_head: false
+
+openpi:
+  task: eval
+  config_name: "pi0_aloha_robotwin"
+  num_images_in_input: 3
+  action_chunk: ${..num_action_chunks}
+  action_env_dim: ${..action_dim}
+  model_action_dim: 32
+  paligemma_variant: "gemma_2b_lora"
+  action_expert_variant: "gemma_300m_lora"
+  max_token_len: 48
+  discrete_state_input: false
+  lora_style: "robotwin_pi0_native_jax"
+  paligemma_lora_rank: 16
+  action_expert_lora_rank: 32
+  lora_init_std: 0.01
